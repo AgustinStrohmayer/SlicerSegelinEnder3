@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path.cwd()
 APP = ROOT / 'appSlicerSegelin' / 'app.py'
 
 a = Analysis(

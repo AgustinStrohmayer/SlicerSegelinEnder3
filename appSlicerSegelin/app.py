@@ -46,7 +46,7 @@ class AppSlicerCNC:
         
         self.drag_data = {"x": 0, "y": 0}
 
-        # Simulación en tiempo real
+        # Real-time simulation
         self.reproduciendo = False
         self.play_after_id = None
         self.tiempo_total_seg = 0.0
@@ -56,14 +56,14 @@ class AppSlicerCNC:
         self.play_duraciones = []
         self.play_last_slider_idx = -1
 
-        # Preview por capas (placas)
+        # Layer preview (plates)
         self.capas_preview = []
-        self.capa_preview_idx = -1  # -1 = vista total
+        self.capa_preview_idx = -1  # -1 = full view
         self.editando_capa_idx = None
         self.backup_dxf_completo = None
 
-        # Cortes manuales (lineas de particionado)
-        # cada corte: {"a":..., "b":..., "c":..., "tipo":"Y|Z|2P", "meta":...}
+        # Manual cuts (partition lines)
+        # each cut: {"a":..., "b":..., "c":..., "tipo":"Y|Z|2P", "meta":...}
         self.cortes_manuales = []
         self.pendiente_corte_diag_p1 = None
         self.total_view_transform = None
@@ -71,8 +71,8 @@ class AppSlicerCNC:
         self.info_unidades_dxf = "INSUNITS: --"
         self.corte_invertido = False
 
-        # --- INTERFAZ GRÁFICA ---
-        # Sidebar izquierdo scrolleable para no perder controles en pantallas bajas
+        # --- GRAPHICAL INTERFACE ---
+        # Scrollable left sidebar so controls remain accessible on smaller screens
         sidebar_container = tk.Frame(root)
         sidebar_container.pack(side=tk.LEFT, fill=tk.Y)
 
@@ -116,7 +116,7 @@ class AppSlicerCNC:
         tk.Label(frame_import, text="DXF Scale x").pack(side=tk.LEFT, padx=(8, 2))
         tk.Entry(frame_import, textvariable=self.escala_importacion_dxf, width=6).pack(side=tk.LEFT)
         
-        # Herramientas de ajuste
+        # Adjustment tools
         tk.Label(panel_izq, text="Adjust Shape:", font=("Arial", 9, "bold")).pack(anchor=tk.W, pady=(10,0))
         frame_herramientas = tk.Frame(panel_izq)
         frame_herramientas.pack(fill=tk.X, pady=2)
@@ -278,7 +278,7 @@ class AppSlicerCNC:
         self._actualizar_label_cortes_manuales()
 
     def _construir_panel_cortes_manuales(self, panel_izq):
-        """Panel de gestión de cortes manuales (lista + edición básica)."""
+        """Manual cut management panel (list + basic editing)."""
         tk.Label(panel_izq, text="Manual Cuts", font=("Arial", 9, "bold")).pack(anchor=tk.W, pady=(2, 0))
 
         frame_ref = tk.Frame(panel_izq)
@@ -335,7 +335,7 @@ class AppSlicerCNC:
         self.lbl_estado_corte_diag = tk.Label(panel_izq, text="Diagonal: inactive", font=("Arial", 8), fg="#666")
         self.lbl_estado_corte_diag.pack(anchor=tk.W, pady=(0, 4))
 
-    # --- LÓGICA DE INTERFAZ Y DIBUJO ---
+    # --- UI AND DRAWING LOGIC ---
     def iniciar_arrastre(self, event):
         self.drag_data["x"] = event.x
         self.drag_data["y"] = event.y
@@ -377,7 +377,7 @@ class AppSlicerCNC:
         return max(1, w), max(1, h)
 
     def _get_work_view_transform(self):
-        """Transformación para dibujar área de trabajo aprovechando al máximo el canvas visible."""
+        """Transform used to draw the work area and maximize the visible canvas."""
         w, h = self._get_canvas_size(self.canvas)
         pad = 10.0
         ly = max(1e-6, float(self.limite_y_mm))
@@ -395,7 +395,7 @@ class AppSlicerCNC:
         return {"w": w, "h": h, "s": s, "ox": ox, "oy": oy}
 
     def _factor_unidades_a_mm(self, doc):
-        """Retorna factor para convertir coordenadas del DXF a milímetros."""
+        """Returns conversion factor from DXF coordinates to millimeters."""
         insunits = 0
         try:
             insunits = int(getattr(doc, "units", 0) or 0)
@@ -409,14 +409,14 @@ class AppSlicerCNC:
         if insunits in (0, 4):
             return 1.0
 
-        # Intento con API de ezdxf si está disponible
+        # Try ezdxf API when available
         if ezunits is not None:
             try:
                 return float(ezunits.conversion_factor(insunits, ezunits.MM))
             except Exception:
                 pass
 
-        # Fallback simple para unidades más comunes
+        # Simple fallback for common units
         tabla = {
             1: 25.4,        # inch
             2: 304.8,       # foot
@@ -550,11 +550,11 @@ class AppSlicerCNC:
             self.dibujar(self.slider_sim.get())
 
     def _coords_maquina_a_base(self, y_m, z_m):
-        """Convierte coordenadas máquina a coordenadas DXF base usando offsets actuales."""
+        """Convert machine coordinates to base DXF coordinates using current offsets."""
         return (y_m - self.offset_y, z_m - self.offset_z)
 
     def _corte_manual_a_linea_maquina(self, corte):
-        """Convierte un corte manual (definido en base DXF) a recta en coords máquina: a*y+b*z+c=0."""
+        """Convert a manual cut (defined in DXF base) to machine-line form: a*y+b*z+c=0."""
         tipo = corte.get("tipo")
 
         if tipo == "Y":
@@ -567,7 +567,7 @@ class AppSlicerCNC:
             zm = zb + self.offset_z
             return (0.0, 1.0, -zm)
 
-        # 2P (o fallback legacy): si tenemos c_base la transformamos por traslación.
+        # 2P (or legacy fallback): transform c_base by translation.
         a = float(corte.get("a", 0.0))
         b = float(corte.get("b", 0.0))
         c_base = float(corte.get("c_base", corte.get("c", 0.0)))
@@ -773,11 +773,11 @@ class AppSlicerCNC:
         self.dibujar(self.slider_sim.get())
 
     def cambiar_modo_dividir_placas(self):
-        """Activa/desactiva seccionado por placas y resetea previews para evitar estados mezclados."""
+        """Enable/disable plate sectioning and reset previews to avoid mixed states."""
         if self.reproduciendo:
             self.detener_simulacion_tiempo_real()
 
-        # Si estaba editando una capa, volvemos al DXF completo
+        # If a layer was being edited, return to the full DXF
         if self.backup_dxf_completo is not None:
             self.lineas = list(self.backup_dxf_completo["lineas"])
             self.offset_y = self.backup_dxf_completo["offset_y"]
@@ -812,7 +812,7 @@ class AppSlicerCNC:
         self.lbl_capa_preview.config(text="YxZ plate preview: OFF")
 
     def sincronizar_edicion_capa_si_corresponde(self):
-        """Si estamos editando una capa, bakea offsets en la geometría y actualiza el modelo de capa."""
+        """If editing a layer, bake offsets into geometry and update layer model data."""
         if self.editando_capa_idx is None:
             return
         if not (0 <= self.editando_capa_idx < len(self.capas_preview)):
@@ -843,7 +843,7 @@ class AppSlicerCNC:
         h = int(float(self.canvas_total.cget("height")))
         self.canvas_total.create_rectangle(0, 0, w, h, outline="#999999")
 
-        # Tomamos datos globales (sin deformación) para auto-fit con escala real 1:1 entre ejes.
+        # Use global data (no distortion) for auto-fit with real 1:1 axis scale.
         segmentos_base = []
         if self.capas_preview:
             for capa in self.capas_preview:
@@ -912,7 +912,7 @@ class AppSlicerCNC:
             for y1, z1, y2, z2 in segmentos_base:
                 self.canvas_total.create_line(y_to_x(y1), z_to_y(z1), y_to_x(y2), z_to_y(z2), fill="#1976D2", width=2)
 
-        # Dibujo de cortes manuales (solo referencia)
+        # Draw manual cuts (reference only)
         if self.usar_cortes_manuales.get() and self.cortes_manuales:
             margen = max(span_y, span_z) * 2.0 + 1000.0
             for c in self.cortes_manuales:
@@ -946,7 +946,7 @@ class AppSlicerCNC:
         self._actualizar_label_dimensiones_dxf()
 
     def _trayectoria_activa(self):
-        """Retorna (trayectoria, usa_offset). Si es preview de capa, ya está en coords máquina y no usa offset."""
+        """Return (path, uses_offset). Layer previews are already in machine coordinates."""
         if 0 <= self.capa_preview_idx < len(self.capas_preview):
             return self.capas_preview[self.capa_preview_idx]["trayectoria"], False
         return self.obtener_trayectoria_completa(), True
@@ -1048,7 +1048,7 @@ class AppSlicerCNC:
             messagebox.showwarning("No height", "Could not calculate height for layer preview.")
             return
 
-        # Modo cortes manuales: particiona por líneas del usuario y usa flujo normal por pieza.
+        # Manual-cut mode: partition by user lines and use normal per-part workflow.
         if self.usar_cortes_manuales.get():
             if not self.cortes_manuales:
                 messagebox.showinfo(
@@ -1163,11 +1163,11 @@ class AppSlicerCNC:
         self.refrescar_info_tiempo(0.0)
 
     def editar_capa_actual(self):
-        """Convierte la capa en preview a geometría editable independiente."""
+        """Convert the previewed layer into independently editable geometry."""
         self._cargar_capa_enfocada_para_edicion()
 
     def _cargar_capa_enfocada_para_edicion(self):
-        """Carga automáticamente la capa enfocada para edición, sin requerir botón manual."""
+        """Automatically load the focused layer for editing (no manual button needed)."""
         if not (0 <= self.capa_preview_idx < len(self.capas_preview)):
             return
 
@@ -1187,7 +1187,7 @@ class AppSlicerCNC:
         self.btn_guardar_capa_actual.config(state=tk.NORMAL)
 
     def restaurar_dxf_completo(self):
-        """Restaura la geometría completa original luego de editar capas por separado."""
+        """Restore full original geometry after editing layers individually."""
         if self.backup_dxf_completo is None:
             return
 
@@ -1451,7 +1451,7 @@ class AppSlicerCNC:
         return rotadas
 
     def _obtener_trayectoria_corte_desde(self, lineas_base):
-        """Devuelve trayectoria continua arrancando desde el punto más a la izquierda de un conjunto de líneas."""
+        """Return a continuous path starting from the leftmost endpoint in a segment set."""
         if not lineas_base:
             return []
 
@@ -1459,7 +1459,7 @@ class AppSlicerCNC:
         segmentos = list(lineas_base)
         usados = [False] * len(segmentos)
 
-        # Arranque: punto inicial más a la izquierda de todos los extremos
+        # Start from the leftmost endpoint across all segment ends
         mejor_idx = 0
         mejor_inv = False
         mejor_key = None
@@ -1483,7 +1483,7 @@ class AppSlicerCNC:
         usados[mejor_idx] = True
         fin_y, fin_z = y2, z2
 
-        # Encadenado por continuidad geométrica
+        # Chain segments by geometric continuity
         for _ in range(len(segmentos) - 1):
             elegido = None
             inv = False
@@ -1530,17 +1530,17 @@ class AppSlicerCNC:
         return trayectoria
 
     def obtener_trayectoria_corte(self):
-        """Devuelve una trayectoria continua, arrancando en el punto más a la izquierda del DXF."""
+        """Return a continuous path starting from the leftmost point in the DXF."""
         return self._obtener_trayectoria_corte_desde(self.lineas)
 
     def _obtener_trayectoria_completa_desde(self, lineas_base, agregar_uniones=False):
-        """Devuelve trayectoria completa para un conjunto de líneas.
+        """Return full path for a segment set.
 
-        Criterio:
-        - entrada horizontal de 10 mm hacia el inicio de corte
-        - salida horizontal de 10 mm desde el final de corte
-        - retorno al mismo punto de inicio (punto naranja), para que inicio y fin coincidan exactamente
-        - si agregar_uniones=True, inserta tramos rectos entre segmentos desconectados.
+        Rules:
+        - 10 mm horizontal entry toward the cut start
+        - 10 mm horizontal exit from the cut end
+        - return to the same start point (orange point), so start/end match exactly
+        - if agregar_uniones=True, insert straight links between disconnected segments.
         """
         corte = self._obtener_trayectoria_corte_desde(lineas_base)
         if not corte:
@@ -1573,7 +1573,7 @@ class AppSlicerCNC:
         salida_y = fin_y + (10.0 * signo_fin)
         salida = (fin_y, fin_z, salida_y, fin_z, "salida")
 
-        # Retorno externo al mismo punto inicial de operación (punto naranja)
+        # External return to the same operational start point (orange point)
         # 1) horizontal hasta Y de entrada
         # 2) vertical final solo si Z difiere
         retorno = []
@@ -1585,7 +1585,7 @@ class AppSlicerCNC:
         return [entrada] + corte_tipado + [salida] + retorno
 
     def obtener_trayectoria_completa(self):
-        """Devuelve trayectoria con entrada/salida horizontal de 10 mm.
+        """Return path with 10 mm horizontal entry/exit.
 
         Cada item: (y1, z1, y2, z2, tipo)
         tipo: 'entrada' | 'corte' | 'salida' | 'retorno_h' | 'retorno_v'
@@ -1665,7 +1665,7 @@ class AppSlicerCNC:
         return (cy1, cz1, cy2, cz2)
 
     def _clip_segmento_a_rect(self, y1, z1, y2, z2, y_min, y_max, z_min, z_max):
-        """Recorta un segmento al rectángulo [y_min,y_max] x [z_min,z_max]."""
+        """Clip a segment to rectangle [y_min,y_max] x [z_min,z_max]."""
         rec_y = self._clip_segmento_a_banda_y(y1, z1, y2, z2, y_min, y_max)
         if rec_y is None:
             return None
@@ -1674,13 +1674,13 @@ class AppSlicerCNC:
         return rec_z
 
     def _split_segmento_por_linea(self, y1, z1, y2, z2, a, b, c):
-        """Devuelve lista de subsegmentos al cortar un segmento por una línea a*y+b*z+c=0."""
+        """Return subsegment list when splitting by line a*y+b*z+c=0."""
         eps = 1e-9
 
         f1 = (a * y1) + (b * z1) + c
         f2 = (a * y2) + (b * z2) + c
 
-        # Segmento completo sobre línea o mismo lado: no hay split real
+        # Full segment on line or same side: no real split
         if abs(f1) <= eps and abs(f2) <= eps:
             return [(y1, z1, y2, z2)]
         if (f1 > eps and f2 > eps) or (f1 < -eps and f2 < -eps):
@@ -1699,7 +1699,7 @@ class AppSlicerCNC:
         return [(y1, z1, yi, zi), (yi, zi, y2, z2)]
 
     def _deduplicar_puntos(self, puntos, tol=1e-6):
-        """Deduplica puntos 2D por cercanía y retorna lista estable."""
+        """Deduplicate 2D points by proximity and return stable list."""
         unicos = []
         for y, z in puntos:
             repetido = False
@@ -1755,7 +1755,7 @@ class AppSlicerCNC:
         return internos
 
     def _snap_segmentos(self, segmentos, tol=1e-5):
-        """Ajusta extremos de segmentos a nodos comunes para evitar micro-gaps numéricos."""
+        """Snap segment endpoints to shared nodes to avoid numerical micro-gaps."""
         if not segmentos:
             return []
 
@@ -1785,7 +1785,7 @@ class AppSlicerCNC:
         return out
 
     def _construir_capas_desde_cortes_manuales(self, corte_maquina):
-        """Particiona geometría de corte por líneas manuales y devuelve capas/piezas listas para flujo estándar."""
+        """Partition cut geometry by manual lines and return layers/parts for standard flow."""
         if not corte_maquina:
             return []
         if not self.cortes_manuales:
@@ -1793,7 +1793,7 @@ class AppSlicerCNC:
 
         lineas_corte_maquina = [self._corte_manual_a_linea_maquina(c) for c in self.cortes_manuales]
 
-        # 1) split del contorno por todas las líneas de corte
+        # 1) split contour by all cut lines
         segmentitos = list(corte_maquina)
         for a, b, c in lineas_corte_maquina:
             nuevos = []
@@ -1801,10 +1801,10 @@ class AppSlicerCNC:
                 nuevos.extend(self._split_segmento_por_linea(y1, z1, y2, z2, a, b, c))
             segmentitos = nuevos
 
-        # 2) aristas internas de corte (intersección contorno-línea en pares)
+        # 2) internal cut edges (contour-line intersection paired)
         aristas_internas = self._segmentos_corte_internos_desde_intersecciones(corte_maquina, lineas_corte_maquina)
 
-        # 3) unificar y subdividir nuevamente para insertar nodos en cruces
+        # 3) unify and split again to insert nodes at crossings
         todos = segmentitos + aristas_internas
         for a, b, c in lineas_corte_maquina:
             nuevos = []
@@ -1813,8 +1813,8 @@ class AppSlicerCNC:
             todos = nuevos
         todos = self._snap_segmentos(todos)
 
-        # 4) agrupar por región (firma de lado respecto a cada corte)
-        #    segmentos sobre línea (estado 0) se asignan a ambas regiones vecinas.
+        # 4) group by region (side signature with respect to each cut)
+        #    on-line segments (state 0) are assigned to both neighboring regions.
         eps = 1e-7
         regiones = {}
         firmas_existentes = set()
@@ -1885,7 +1885,7 @@ class AppSlicerCNC:
             ]
             segs_local = self._snap_segmentos(segs_local)
 
-            # En cortes manuales evitamos uniones automáticas diagonales entre islas.
+            # In manual cuts, avoid automatic diagonal unions between islands.
             tray = self._obtener_trayectoria_completa_desde(segs_local, agregar_uniones=False)
             if not tray:
                 continue
@@ -1905,9 +1905,9 @@ class AppSlicerCNC:
         return capas
 
     def _cerrar_contornos_abiertos(self, segmentos, tol=1e-5):
-        """Cierra contornos abiertos conectando extremos (grado 1) con cortes rectos.
+        """Close open contours by connecting degree-1 endpoints with straight cuts.
 
-        Útil tras seccionar un perfil cerrado por líneas manuales para evitar travels diagonales.
+        Useful after splitting a closed profile with manual lines to avoid diagonal travels.
         """
         if not segmentos:
             return []
@@ -1917,7 +1917,7 @@ class AppSlicerCNC:
         def obtener_nodo(y, z):
             for i, n in enumerate(nodos):
                 if abs(n["y"] - y) <= tol and abs(n["z"] - z) <= tol:
-                    # Promedio suave para estabilizar acumulación
+                    # Smooth average to stabilize accumulation
                     n["y"] = (n["y"] + y) * 0.5
                     n["z"] = (n["z"] + z) * 0.5
                     return i
@@ -1960,7 +1960,7 @@ class AppSlicerCNC:
         return segs + cierres
 
     def _generar_gcode_desde_trayectoria(self, trayectoria, v_mov_mmin, encabezado_extra=None):
-        """Genera líneas de G-code a partir de una trayectoria ya posicionada en coordenadas máquina."""
+        """Generate G-code lines from a path already positioned in machine coordinates."""
         gcode = []
         gcode.append(";FLAVOR:Marlin")
         gcode.append(";TARGET_MACHINE.NAME:Ender-3 Hot Wire CNC")
@@ -2005,7 +2005,7 @@ class AppSlicerCNC:
         return gcode
 
     def _obtener_segmentos_para_exportar_dxf(self):
-        """Retorna segmentos (y1,z1,y2,z2) a exportar en DXF, en la vista/estado activo."""
+        """Return segments (y1,z1,y2,z2) for DXF export in active view/state."""
         if 0 <= self.capa_preview_idx < len(self.capas_preview):
             capa = self.capas_preview[self.capa_preview_idx]
             return list(capa.get("lineas_edit", []))
@@ -2016,7 +2016,7 @@ class AppSlicerCNC:
         ]
 
     def exportar_dxf_modificado(self):
-        """Exporta la geometría modificada actual a DXF (no G-code)."""
+        """Export current modified geometry to DXF (not G-code)."""
         segmentos = self._obtener_segmentos_para_exportar_dxf()
         if not segmentos:
             messagebox.showwarning("No geometry", "No segments available to export to DXF.")
@@ -2033,7 +2033,7 @@ class AppSlicerCNC:
         try:
             doc_out = ezdxf.new("R2010")
             try:
-                doc_out.units = 4  # milímetros
+                doc_out.units = 4  # millimeters
             except Exception:
                 pass
             msp_out = doc_out.modelspace()
@@ -2149,7 +2149,7 @@ class AppSlicerCNC:
         if not ruta_base:
             return
 
-        # Tomamos solo la trayectoria de corte del perfil y la llevamos a coordenadas de máquina actuales.
+        # Use only profile cut path and move it to current machine coordinates.
         corte_base = self.obtener_trayectoria_corte()
         if not corte_base:
             messagebox.showwarning("No paths", "No cut path available to split.")
@@ -2252,7 +2252,7 @@ class AppSlicerCNC:
         )
 
     def alinear_origen_corte(self):
-        """Hace coincidir origen operativo y origen del corte (0,0), sin validar límites."""
+        """Match operational origin and cut origin (0,0), without boundary validation."""
         if self.reproduciendo:
             self.detener_simulacion_tiempo_real()
         if self.editando_capa_idx is None:
@@ -2307,7 +2307,7 @@ class AppSlicerCNC:
         self.dibujar_canvas_total()
 
     def rotar_sobre_origen_desde_ui(self, signo):
-        """Aplica rotación fina usando el valor exacto ingresado por usuario."""
+        """Apply fine rotation using exact user-entered value."""
         texto = self.grados_origen.get().strip().replace(",", ".")
         try:
             grados = float(texto)
@@ -2409,7 +2409,7 @@ class AppSlicerCNC:
                     min_y, max_y = min(min_y, y1, y2), max(max_y, y1, y2)
                     min_z, max_z = min(min_z, z1, z2), max(max_z, z1, z2)
                     
-                # Soporte para Polilíneas ligeras (LWPOLYLINE)
+                # Support for lightweight polylines (LWPOLYLINE)
                 elif e.dxftype() == 'LWPOLYLINE':
                     puntos = list(e.get_points('xy'))
                     for i in range(len(puntos)-1):
@@ -2420,7 +2420,7 @@ class AppSlicerCNC:
                         min_y, max_y = min(min_y, y1, y2), max(max_y, y1, y2)
                         min_z, max_z = min(min_z, z1, z2), max(max_z, z1, z2)
                         
-                # Soporte para Polilíneas antiguas/pesadas (POLYLINE)
+                # Support for old/heavy polylines (POLYLINE)
                 elif e.dxftype() == 'POLYLINE':
                     puntos = list(e.points())
                     for i in range(len(puntos)-1):
@@ -2431,13 +2431,13 @@ class AppSlicerCNC:
                         min_y, max_y = min(min_y, y1, y2), max(max_y, y1, y2)
                         min_z, max_z = min(min_z, z1, z2), max(max_z, z1, z2)
 
-                # Soporte para Splines, Arcos, Círculos, Elipses
+                # Support for splines, arcs, circles, ellipses
                 elif e.dxftype() in ('SPLINE', 'ARC', 'CIRCLE', 'ELLIPSE'):
                     if path:
                         try:
-                            # Convertir la entidad a un path y luego aplanarla en pequeños segmentos de linea
+                            # Convert entity to a path and flatten into small line segments
                             p = path.make_path(e)
-                            puntos = list(p.flattening(distance=0.1)) # 0.1 mm de precisión
+                            puntos = list(p.flattening(distance=0.1)) # 0.1 mm precision
                             for i in range(len(puntos)-1):
                                 y1, z1 = puntos[i][0] * factor_mm, puntos[i][1] * factor_mm
                                 y2, z2 = puntos[i+1][0] * factor_mm, puntos[i+1][1] * factor_mm
@@ -2720,7 +2720,7 @@ class AppSlicerCNC:
 
             if i < seg_completos:
                 self.canvas.create_line(py1, pz1, py2, pz2, fill=color, width=2)
-                # Cabeza de corte en el último punto renderizado de la simulación
+                # Cut head at the last rendered simulation point
                 if i == seg_completos - 1 and frac == 0:
                     self.canvas.create_oval(py2-5, pz2-5, py2+5, pz2+5, fill="orange", outline="black")
             elif i == seg_completos and frac > 0:
@@ -2765,7 +2765,7 @@ class AppSlicerCNC:
 
         self.dibujar_canvas_total()
 
-    # --- GENERACIÓN DE GCODE ---
+    # --- G-CODE GENERATION ---
     def exportar_gcode(self):
         ruta_gcode = filedialog.asksaveasfilename(title="Save G-Code", defaultextension=".gcode", filetypes=[("G-Code", "*.gcode")])
         if not ruta_gcode: return
@@ -2790,7 +2790,7 @@ class AppSlicerCNC:
         gcode.append("G92 Y0 Z0 ; Set current position as origin (0,0)")
         gcode.append(";--- CUT START ---")
 
-        # Partimos asumiendo que la máquina está en origen tras G92 Y0 Z0
+        # Start assuming machine is at origin after G92 Y0 Z0
         y_actual, z_actual = 0.0, 0.0
 
         for (y1, z1, y2, z2, tipo) in self.obtener_trayectoria_completa():
@@ -2803,7 +2803,7 @@ class AppSlicerCNC:
             if (abs(y_actual - y1_mod) > 1e-6) or (abs(z_actual - z1_mod) > 1e-6):
                 gcode.append(f"G1 F{v_mov_mmin} Y{y1_mod} Z{z1_mod}")
             
-            # Movimiento de corte: Forzamos el F (Feedrate) en cada línea para mantener velocidad constante
+            # Cut movement: force F (feedrate) on each line to keep constant speed
             if tipo == "entrada":
                 gcode.append("; 10mm entry")
             elif tipo == "salida":
