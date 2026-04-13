@@ -13,9 +13,10 @@ Herramienta de escritorio en Python para cargar DXF, ajustar geometría en el pl
 ## Estructura principal
 
 - `appSlicerSegelin/app.py`: aplicación principal Tkinter.
+- `modelos-3d/`: modelos CAD y piezas imprimibles.
+- `ejemplos-gcode/`: G-Code de ejemplo y pruebas.
 - `SlicerSegelinEnder3.spec`: paquete PyInstaller normal.
 - `SlicerSegelinEnder3_portable.spec`: paquete PyInstaller portable.
-- `*.gcode`, `*.STEP`, `*.STL`, `*.SLDPRT`, `*.SLDASM`: piezas, referencias y muestras del proyecto.
 
 ## Requisitos
 
