@@ -1,43 +1,53 @@
 # SlicerSegelin Ender 3
 
-Herramienta de escritorio en Python para cargar DXF, ajustar geometría en el plano Y/Z y generar G-Code para un sistema CNC de hilo caliente basado en Ender 3.
+Aplicación de escritorio en Python para preparar geometría en el plano Y/Z y generar G-Code para un CNC de hilo caliente basado en Ender 3.
 
-## Qué hace
+## Resumen
 
-- Importa entidades DXF compatibles y las convierte a segmentos de trabajo.
-- Permite rotar, reflejar, trasladar y alinear el perfil.
-- Simula el recorrido de corte y estima tiempos.
+- Importa DXF y otras entidades compatibles con `ezdxf`.
+- Permite rotar, reflejar, trasladar y alinear perfiles.
+- Simula el corte y estima tiempos.
 - Exporta G-Code normal, por placas Y×Z y por cortes manuales.
-- Puede exportar DXF modificado.
+- Exporta el DXF modificado cuando necesitas volver a usar la geometría procesada.
 
-## Estructura principal
+## Estructura del proyecto
 
-- `appSlicerSegelin/app.py`: aplicación principal Tkinter.
-- `modelos-3d/`: modelos CAD y piezas imprimibles.
-- `ejemplos-gcode/`: G-Code de ejemplo y pruebas.
-- `SlicerSegelinEnder3.spec`: paquete PyInstaller normal.
-- `SlicerSegelinEnder3_portable.spec`: paquete PyInstaller portable.
+- `appSlicerSegelin/app.py` — interfaz y lógica principal de la app.
+- `modelos-3d/` — modelos CAD y piezas imprimibles.
+- `ejemplos-gcode/` — G-Code de ejemplo y pruebas.
+- `archive/` — históricos y variantes antiguas conservadas como referencia.
+- `SlicerSegelinEnder3.spec` — build normal con PyInstaller.
+- `SlicerSegelinEnder3_portable.spec` — build portable con PyInstaller.
 
 ## Requisitos
 
 - Python 3.10 o superior
-- Dependencias desde `requirements.txt`
+- Dependencias listadas en `requirements.txt`
 
-## Ejecutar en local
+## Puesta en marcha
 
-Instala dependencias y lanza la aplicación desde la raíz del proyecto:
+Desde la raíz del repositorio:
 
-1. `pip install -r requirements.txt`
-2. `python appSlicerSegelin/app.py`
+1. Instalar dependencias:
+	`pip install -r requirements.txt`
+2. Ejecutar la app:
+	`python appSlicerSegelin/app.py`
 
-## Generar ejecutables
+## Generación de ejecutables
 
-Usa PyInstaller con los archivos `.spec` incluidos en la raíz:
+Los archivos `.spec` de la raíz están preparados para PyInstaller y usan rutas relativas, así que funcionan bien tras clonar el proyecto.
 
-- `SlicerSegelinEnder3.spec`
-- `SlicerSegelinEnder3_portable.spec`
+## Cómo colaborar
 
-## Notas
+1. Crea una rama para tu cambio.
+2. Mantén el código en `appSlicerSegelin/`.
+3. No subas artefactos de `build/`, `dist/` ni `__pycache__/`.
+4. Si agregas modelos o ejemplos, colócalos en `modelos-3d/` o `ejemplos-gcode/`.
 
-- Los directorios `build/`, `dist/`, `__pycache__/` y el entorno `.venv/` están excluidos del control de versiones.
-- Si abres un DXF grande, la app genera trayectorias y capas en memoria; los archivos de salida se guardan aparte.
+## Licencia
+
+Este proyecto se publica con licencia MIT. Consulta `LICENSE`.
+
+## Seguridad
+
+Si encuentras un problema de seguridad o un comportamiento inesperado en archivos DXF/G-Code, revísalo primero en un entorno aislado y luego abre un reporte.
