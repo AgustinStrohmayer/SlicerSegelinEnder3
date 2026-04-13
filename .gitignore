@@ -1,0 +1,23 @@
+# Python cache and virtual environments
+.venv/
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Build outputs
+build/
+dist/
+appSlicerSegelin/build/
+appSlicerSegelin/dist/
+appSlicerSegelin/__pycache__/
+
+# PyInstaller / packaging leftovers
+*.spec.bak
+*.manifest
+*.log
+
+# OS and editor noise
+.DS_Store
+Thumbs.db
+*.tmp
+*.swp
