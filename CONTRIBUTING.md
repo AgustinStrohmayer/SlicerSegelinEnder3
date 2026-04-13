@@ -18,8 +18,8 @@ Thanks for helping improve SlicerSegelin Ender 3.
 ## Folder conventions
 
 - App code: `appSlicerSegelin/`
-- Printable models: `modelos-3d/`
-- Sample G-Code: `ejemplos-gcode/`
+- Printable models: `models-3d/`
+- Sample G-Code: `gcode-examples/`
 
 ## Pull requests
 

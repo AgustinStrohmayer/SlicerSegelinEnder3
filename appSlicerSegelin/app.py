@@ -16,7 +16,7 @@ import os
 class AppSlicerCNC:
     def __init__(self, root):
         self.root = root
-        self.root.title("Slicer CNC Hilo Caliente - Ender 3")
+        self.root.title("Hot Wire CNC Slicer - Ender 3")
         self.root.minsize(1080, 700)
         
         # --- VARIABLES ---
@@ -32,7 +32,7 @@ class AppSlicerCNC:
         self.vel_corte = tk.StringVar(value="10")
         self.grados_origen = tk.StringVar(value="0.1")
         self.paso_traslado = tk.StringVar(value="0.1")
-        self.nombre_lote_capas = tk.StringVar(value="corte")
+        self.nombre_lote_capas = tk.StringVar(value="cut")
         self.area_y_mm_var = tk.StringVar(value="220")
         self.area_z_mm_var = tk.StringVar(value="100")
         self.dividir_en_placas = tk.BooleanVar(value=False)
@@ -42,7 +42,7 @@ class AppSlicerCNC:
         self.escala_importacion_dxf = tk.StringVar(value="1.0")
         self.corte_y_var = tk.StringVar(value="")
         self.corte_z_var = tk.StringVar(value="")
-        self.referencia_cortes_var = tk.StringVar(value="Base DXF")
+        self.referencia_cortes_var = tk.StringVar(value="DXF Base")
         
         self.drag_data = {"x": 0, "y": 0}
 
@@ -108,25 +108,25 @@ class AppSlicerCNC:
         panel_izq.bind("<Enter>", _bind_sidebar_mousewheel)
         panel_izq.bind("<Leave>", _unbind_sidebar_mousewheel)
         
-        tk.Button(panel_izq, text="1. Cargar DXF", command=self.cargar_dxf, bg="#2196F3", fg="white", font=("Arial", 11, "bold")).pack(fill=tk.X, pady=5)
+        tk.Button(panel_izq, text="1. Load DXF", command=self.cargar_dxf, bg="#2196F3", fg="white", font=("Arial", 11, "bold")).pack(fill=tk.X, pady=5)
 
         frame_import = tk.Frame(panel_izq)
         frame_import.pack(fill=tk.X, pady=(0, 6))
-        tk.Checkbutton(frame_import, text="Usar INSUNITS", variable=self.usar_insunits_auto).pack(side=tk.LEFT)
-        tk.Label(frame_import, text="Escala DXF x").pack(side=tk.LEFT, padx=(8, 2))
+        tk.Checkbutton(frame_import, text="Use INSUNITS", variable=self.usar_insunits_auto).pack(side=tk.LEFT)
+        tk.Label(frame_import, text="DXF Scale x").pack(side=tk.LEFT, padx=(8, 2))
         tk.Entry(frame_import, textvariable=self.escala_importacion_dxf, width=6).pack(side=tk.LEFT)
         
         # Herramientas de ajuste
-        tk.Label(panel_izq, text="Ajustar Forma:", font=("Arial", 9, "bold")).pack(anchor=tk.W, pady=(10,0))
+        tk.Label(panel_izq, text="Adjust Shape:", font=("Arial", 9, "bold")).pack(anchor=tk.W, pady=(10,0))
         frame_herramientas = tk.Frame(panel_izq)
         frame_herramientas.pack(fill=tk.X, pady=2)
-        tk.Button(frame_herramientas, text="Rotar 90°", command=lambda: self.rotar(90)).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 2))
-        tk.Button(frame_herramientas, text="Auto Altura", command=self.auto_ajustar).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(2, 0))
+        tk.Button(frame_herramientas, text="Rotate 90°", command=lambda: self.rotar(90)).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 2))
+        tk.Button(frame_herramientas, text="Auto Height", command=self.auto_ajustar).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(2, 0))
 
         frame_herramientas_2 = tk.Frame(panel_izq)
         frame_herramientas_2.pack(fill=tk.X, pady=(2, 2))
-        tk.Button(frame_herramientas_2, text="Reflejar Vertical", command=self.reflejar_vertical).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 2))
-        tk.Button(frame_herramientas_2, text="Reflejar Horizontal", command=self.reflejar_horizontal).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(2, 0))
+        tk.Button(frame_herramientas_2, text="Mirror Vertical", command=self.reflejar_vertical).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 2))
+        tk.Button(frame_herramientas_2, text="Mirror Horizontal", command=self.reflejar_horizontal).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(2, 0))
 
         frame_rot_origen = tk.Frame(panel_izq)
         frame_rot_origen.pack(fill=tk.X, pady=(2, 2))
@@ -137,7 +137,7 @@ class AppSlicerCNC:
 
         frame_traslado_cfg = tk.Frame(panel_izq)
         frame_traslado_cfg.pack(fill=tk.X, pady=(2, 2))
-        tk.Label(frame_traslado_cfg, text="Paso Y/Z:").pack(side=tk.LEFT)
+        tk.Label(frame_traslado_cfg, text="Y/Z step:").pack(side=tk.LEFT)
         tk.Entry(frame_traslado_cfg, textvariable=self.paso_traslado, width=8).pack(side=tk.LEFT, padx=(4, 4))
         tk.Label(frame_traslado_cfg, text="mm").pack(side=tk.LEFT)
 
@@ -151,28 +151,28 @@ class AppSlicerCNC:
         tk.Button(frame_traslado_z, text="Z -", command=lambda: self.trasladar_fino_desde_ui("z", -1)).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 2))
         tk.Button(frame_traslado_z, text="Z +", command=lambda: self.trasladar_fino_desde_ui("z", 1)).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(2, 0))
 
-        self.btn_invertir_corte = tk.Button(panel_izq, text="Invertir Dirección de Corte", command=self.invertir_corte)
+        self.btn_invertir_corte = tk.Button(panel_izq, text="Reverse Cut Direction", command=self.invertir_corte)
         self.btn_invertir_corte.pack(fill=tk.X, pady=(2, 5))
-        tk.Button(panel_izq, text="Alinear Origen al Corte", command=self.alinear_origen_corte).pack(fill=tk.X, pady=(0, 8))
+        tk.Button(panel_izq, text="Align Origin to Cut", command=self.alinear_origen_corte).pack(fill=tk.X, pady=(0, 8))
 
-        tk.Label(panel_izq, text="Velocidad de Trabajo (mm/s):").pack(anchor=tk.W, pady=(10,0))
+        tk.Label(panel_izq, text="Work Speed (mm/s):").pack(anchor=tk.W, pady=(10,0))
         tk.Entry(panel_izq, textvariable=self.vel_corte).pack(fill=tk.X)
         
         tk.Label(panel_izq, text="\nTips:", font=("Arial", 9, "bold")).pack(anchor=tk.W)
-        tk.Label(panel_izq, text="- Arrastra el dibujo para moverlo.\n- Punto VERDE = Inicio de Corte\n- Rojo = Fuera de límite", justify=tk.LEFT, font=("Arial", 8)).pack(anchor=tk.W)
+        tk.Label(panel_izq, text="- Drag the drawing to move it.\n- GREEN point = Cut Start\n- Red = Out of bounds", justify=tk.LEFT, font=("Arial", 8)).pack(anchor=tk.W)
 
-        tk.Label(panel_izq, text="\nÁrea útil / tamaño de placa (Y x Z) mm:", font=("Arial", 9, "bold")).pack(anchor=tk.W)
+        tk.Label(panel_izq, text="\nUsable area / plate size (Y x Z) mm:", font=("Arial", 9, "bold")).pack(anchor=tk.W)
         frame_area = tk.Frame(panel_izq)
         frame_area.pack(fill=tk.X, pady=(2, 6))
         tk.Label(frame_area, text="Y").pack(side=tk.LEFT)
         tk.Entry(frame_area, textvariable=self.area_y_mm_var, width=6).pack(side=tk.LEFT, padx=(2, 6))
         tk.Label(frame_area, text="Z").pack(side=tk.LEFT)
         tk.Entry(frame_area, textvariable=self.area_z_mm_var, width=6).pack(side=tk.LEFT, padx=(2, 6))
-        tk.Button(frame_area, text="Aplicar", command=self.aplicar_area_util).pack(side=tk.LEFT)
+        tk.Button(frame_area, text="Apply", command=self.aplicar_area_util).pack(side=tk.LEFT)
 
         self.chk_dividir_placas = tk.Checkbutton(
             panel_izq,
-            text="Dividir en placas si excede área",
+            text="Split into plates if area is exceeded",
             variable=self.dividir_en_placas,
             command=self.cambiar_modo_dividir_placas
         )
@@ -180,7 +180,7 @@ class AppSlicerCNC:
 
         self.chk_cortes_manuales = tk.Checkbutton(
             panel_izq,
-            text="Usar cortes manuales",
+            text="Use manual cuts",
             variable=self.usar_cortes_manuales,
             command=self.cambiar_modo_cortes_manuales
         )
@@ -188,7 +188,7 @@ class AppSlicerCNC:
 
         self.chk_cierre_manual = tk.Checkbutton(
             panel_izq,
-            text="Cerrar contornos en cortes manuales",
+            text="Close contours in manual cuts",
             variable=self.auto_cerrar_cortes_manuales,
             command=lambda: self.dibujar(self.slider_sim.get() if self.lineas else 0)
         )
@@ -197,7 +197,7 @@ class AppSlicerCNC:
         self._construir_panel_cortes_manuales(panel_izq)
 
         # Slider simulacion interactiva
-        tk.Label(panel_izq, text="\nSimulación de Corte:", font=("Arial", 9, "bold")).pack(anchor=tk.W)
+        tk.Label(panel_izq, text="\nCut Simulation:", font=("Arial", 9, "bold")).pack(anchor=tk.W)
         self.slider_sim = tk.Scale(panel_izq, from_=0, to=0, orient=tk.HORIZONTAL, command=self.actualizar_simulacion, showvalue=False)
         self.slider_sim.pack(fill=tk.X, pady=(0, 10))
 
@@ -208,40 +208,40 @@ class AppSlicerCNC:
         self.btn_stop = tk.Button(frame_play, text="■ Stop", command=self.detener_simulacion_tiempo_real, state=tk.DISABLED)
         self.btn_stop.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(2, 0))
 
-        self.lbl_tiempo = tk.Label(panel_izq, text="Tiempo estimado: --:-- | Transcurrido: 00:00", font=("Arial", 8))
+        self.lbl_tiempo = tk.Label(panel_izq, text="Estimated time: --:-- | Elapsed: 00:00", font=("Arial", 8))
         self.lbl_tiempo.pack(anchor=tk.W, pady=(0, 8))
-        self.lbl_altura = tk.Label(panel_izq, text="Altura máx corte: -- mm (Zmin -- / Zmax --)", font=("Arial", 8, "bold"))
+        self.lbl_altura = tk.Label(panel_izq, text="Max cut height: -- mm (Zmin -- / Zmax --)", font=("Arial", 8, "bold"))
         self.lbl_altura.pack(anchor=tk.W, pady=(0, 8))
 
-        tk.Label(panel_izq, text="Nombre base de archivos:").pack(anchor=tk.W, pady=(2,0))
+        tk.Label(panel_izq, text="Base filename:").pack(anchor=tk.W, pady=(2,0))
         tk.Entry(panel_izq, textvariable=self.nombre_lote_capas).pack(fill=tk.X)
 
         frame_preview_capas = tk.Frame(panel_izq)
         frame_preview_capas.pack(fill=tk.X, pady=(4, 6))
-        self.btn_preview_capas = tk.Button(frame_preview_capas, text="Previsualizar Placas YxZ", command=self.generar_preview_capas, state=tk.DISABLED)
+        self.btn_preview_capas = tk.Button(frame_preview_capas, text="Preview YxZ Plates", command=self.generar_preview_capas, state=tk.DISABLED)
         self.btn_preview_capas.pack(fill=tk.X)
 
         frame_nav_capas = tk.Frame(panel_izq)
         frame_nav_capas.pack(fill=tk.X, pady=(2, 2))
-        self.btn_capa_prev = tk.Button(frame_nav_capas, text="◀ Capa", command=lambda: self.mover_preview_capa(-1), state=tk.DISABLED)
+        self.btn_capa_prev = tk.Button(frame_nav_capas, text="◀ Layer", command=lambda: self.mover_preview_capa(-1), state=tk.DISABLED)
         self.btn_capa_prev.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 2))
-        self.btn_capa_next = tk.Button(frame_nav_capas, text="Capa ▶", command=lambda: self.mover_preview_capa(1), state=tk.DISABLED)
+        self.btn_capa_next = tk.Button(frame_nav_capas, text="Layer ▶", command=lambda: self.mover_preview_capa(1), state=tk.DISABLED)
         self.btn_capa_next.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(2, 0))
 
-        self.btn_vista_total = tk.Button(panel_izq, text="Volver Vista Total", command=self.activar_vista_total, state=tk.DISABLED)
+        self.btn_vista_total = tk.Button(panel_izq, text="Back to Full View", command=self.activar_vista_total, state=tk.DISABLED)
         self.btn_vista_total.pack(fill=tk.X, pady=(0, 4))
-        self.btn_editar_capa = tk.Button(panel_izq, text="Edición automática por foco", command=self.editar_capa_actual, state=tk.DISABLED)
+        self.btn_editar_capa = tk.Button(panel_izq, text="Auto-edit focused layer", command=self.editar_capa_actual, state=tk.DISABLED)
         self.btn_editar_capa.pack(fill=tk.X, pady=(0, 2))
-        self.btn_restaurar_dxf = tk.Button(panel_izq, text="Restaurar DXF Completo", command=self.restaurar_dxf_completo, state=tk.DISABLED)
+        self.btn_restaurar_dxf = tk.Button(panel_izq, text="Restore Full DXF", command=self.restaurar_dxf_completo, state=tk.DISABLED)
         self.btn_restaurar_dxf.pack(fill=tk.X, pady=(0, 4))
-        self.lbl_capa_preview = tk.Label(panel_izq, text="Preview placas YxZ: OFF", font=("Arial", 8))
+        self.lbl_capa_preview = tk.Label(panel_izq, text="YxZ plate preview: OFF", font=("Arial", 8))
         self.lbl_capa_preview.pack(anchor=tk.W, pady=(0, 6))
 
-        self.btn_exportar = tk.Button(panel_izq, text="2. Generar G-Code", command=self.exportar_gcode, state=tk.DISABLED, bg="#4CAF50", fg="white", font=("Arial", 11, "bold"))
+        self.btn_exportar = tk.Button(panel_izq, text="2. Generate G-Code", command=self.exportar_gcode, state=tk.DISABLED, bg="#4CAF50", fg="white", font=("Arial", 11, "bold"))
         self.btn_exportar.pack(fill=tk.X, pady=(8, 4))
         self.btn_exportar_dxf = tk.Button(
             panel_izq,
-            text="2b. Exportar DXF Modificado",
+            text="2b. Export Modified DXF",
             command=self.exportar_dxf_modificado,
             state=tk.DISABLED,
             bg="#1565C0",
@@ -249,17 +249,17 @@ class AppSlicerCNC:
             font=("Arial", 10, "bold")
         )
         self.btn_exportar_dxf.pack(fill=tk.X, pady=(0, 4))
-        self.btn_exportar_capas = tk.Button(panel_izq, text="3. Generar G-Codes por Placas", command=self.exportar_gcode_por_capas, state=tk.DISABLED, bg="#2E7D32", fg="white", font=("Arial", 10, "bold"))
+        self.btn_exportar_capas = tk.Button(panel_izq, text="3. Generate G-Codes by Plates", command=self.exportar_gcode_por_capas, state=tk.DISABLED, bg="#2E7D32", fg="white", font=("Arial", 10, "bold"))
         self.btn_exportar_capas.pack(fill=tk.X, pady=(0, 4))
-        self.btn_guardar_capa_actual = tk.Button(panel_izq, text="Guardar Capa Enfocada", command=self.guardar_capa_enfocada, state=tk.DISABLED, bg="#33691E", fg="white", font=("Arial", 10, "bold"))
+        self.btn_guardar_capa_actual = tk.Button(panel_izq, text="Save Focused Layer", command=self.guardar_capa_enfocada, state=tk.DISABLED, bg="#33691E", fg="white", font=("Arial", 10, "bold"))
         self.btn_guardar_capa_actual.pack(fill=tk.X, pady=(0, 4))
-        self.btn_guardar_batch_carpeta = tk.Button(panel_izq, text="Guardar Batch en Carpeta", command=self.guardar_batch_en_carpeta, state=tk.DISABLED, bg="#1B5E20", fg="white", font=("Arial", 10, "bold"))
+        self.btn_guardar_batch_carpeta = tk.Button(panel_izq, text="Save Batch to Folder", command=self.guardar_batch_en_carpeta, state=tk.DISABLED, bg="#1B5E20", fg="white", font=("Arial", 10, "bold"))
         self.btn_guardar_batch_carpeta.pack(fill=tk.X, pady=(0, 10))
         
         panel_der = tk.Frame(root, padx=10, pady=10)
         panel_der.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
         
-        tk.Label(panel_der, text="Vista Completa (pieza y capas)").pack()
+        tk.Label(panel_der, text="Full View (part and layers)").pack()
         self.lbl_dimensiones_dxf = tk.Label(panel_der, text="DXF: --", font=("Arial", 8, "bold"), anchor="w", justify=tk.LEFT)
         self.lbl_dimensiones_dxf.pack(fill=tk.X, pady=(0, 4))
         dim_canvas_w = int(self.limite_y_mm * self.escala_visual)
@@ -267,7 +267,7 @@ class AppSlicerCNC:
         self.canvas_total = tk.Canvas(panel_der, width=dim_canvas_w, height=max(180, dim_canvas_h), bg="#f0f0f0", relief=tk.SUNKEN, bd=2)
         self.canvas_total.pack(fill=tk.BOTH, expand=True, pady=(0, 8))
 
-        tk.Label(panel_der, text="Área de Trabajo (Vista Y-Z)").pack()
+        tk.Label(panel_der, text="Work Area (Y-Z View)").pack()
         
         self.canvas = tk.Canvas(panel_der, width=dim_canvas_w, height=dim_canvas_h, bg="#e0e0e0", relief=tk.SUNKEN, bd=2)
         self.canvas.pack(fill=tk.BOTH, expand=True)
@@ -279,16 +279,16 @@ class AppSlicerCNC:
 
     def _construir_panel_cortes_manuales(self, panel_izq):
         """Panel de gestión de cortes manuales (lista + edición básica)."""
-        tk.Label(panel_izq, text="Cortes Manuales", font=("Arial", 9, "bold")).pack(anchor=tk.W, pady=(2, 0))
+        tk.Label(panel_izq, text="Manual Cuts", font=("Arial", 9, "bold")).pack(anchor=tk.W, pady=(2, 0))
 
         frame_ref = tk.Frame(panel_izq)
         frame_ref.pack(fill=tk.X, pady=(2, 2))
-        tk.Label(frame_ref, text="Referencia:").pack(side=tk.LEFT)
+        tk.Label(frame_ref, text="Reference:").pack(side=tk.LEFT)
         self.menu_ref_cortes = tk.OptionMenu(
             frame_ref,
             self.referencia_cortes_var,
-            "Base DXF",
-            "Máquina actual",
+            "DXF Base",
+            "Current machine",
             command=lambda _v=None: self._on_cambio_referencia_cortes()
         )
         self.menu_ref_cortes.pack(side=tk.LEFT, padx=(4, 0))
@@ -308,9 +308,9 @@ class AppSlicerCNC:
 
         frame_diag = tk.Frame(panel_izq)
         frame_diag.pack(fill=tk.X, pady=(0, 2))
-        self.btn_add_corte_diag = tk.Button(frame_diag, text="Corte diagonal (2 clics)", command=self.iniciar_corte_manual_dos_puntos, state=tk.DISABLED)
+        self.btn_add_corte_diag = tk.Button(frame_diag, text="Diagonal cut (2 clicks)", command=self.iniciar_corte_manual_dos_puntos, state=tk.DISABLED)
         self.btn_add_corte_diag.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 2))
-        self.btn_limpiar_cortes = tk.Button(frame_diag, text="Limpiar", command=self.limpiar_cortes_manuales, state=tk.DISABLED)
+        self.btn_limpiar_cortes = tk.Button(frame_diag, text="Clear", command=self.limpiar_cortes_manuales, state=tk.DISABLED)
         self.btn_limpiar_cortes.pack(side=tk.LEFT, padx=(2, 0))
 
         frame_lista = tk.Frame(panel_izq)
@@ -324,15 +324,15 @@ class AppSlicerCNC:
 
         frame_lista_btns = tk.Frame(panel_izq)
         frame_lista_btns.pack(fill=tk.X, pady=(0, 4))
-        self.btn_editar_corte = tk.Button(frame_lista_btns, text="Editar", command=self.editar_corte_manual_seleccionado, state=tk.DISABLED)
+        self.btn_editar_corte = tk.Button(frame_lista_btns, text="Edit", command=self.editar_corte_manual_seleccionado, state=tk.DISABLED)
         self.btn_editar_corte.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 2))
-        self.btn_eliminar_corte = tk.Button(frame_lista_btns, text="Eliminar", command=self.eliminar_corte_manual_seleccionado, state=tk.DISABLED)
+        self.btn_eliminar_corte = tk.Button(frame_lista_btns, text="Delete", command=self.eliminar_corte_manual_seleccionado, state=tk.DISABLED)
         self.btn_eliminar_corte.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(2, 0))
 
-        self.lbl_cortes_manuales = tk.Label(panel_izq, text="Cortes manuales: 0", font=("Arial", 8))
+        self.lbl_cortes_manuales = tk.Label(panel_izq, text="Manual cuts: 0", font=("Arial", 8))
         self.lbl_cortes_manuales.pack(anchor=tk.W, pady=(0, 2))
 
-        self.lbl_estado_corte_diag = tk.Label(panel_izq, text="Diagonal: inactiva", font=("Arial", 8), fg="#666")
+        self.lbl_estado_corte_diag = tk.Label(panel_izq, text="Diagonal: inactive", font=("Arial", 8), fg="#666")
         self.lbl_estado_corte_diag.pack(anchor=tk.W, pady=(0, 4))
 
     # --- LÓGICA DE INTERFAZ Y DIBUJO ---
@@ -460,7 +460,7 @@ class AppSlicerCNC:
         alto = max_z - min_z
         self.lbl_dimensiones_dxf.config(
             text=(
-                f"DXF base: Y={ancho:.2f} mm | Z={alto:.2f} mm | "
+                f"DXF base size: Y={ancho:.2f} mm | Z={alto:.2f} mm | "
                 f"Y[{min_y:.2f}..{max_y:.2f}] Z[{min_z:.2f}..{max_z:.2f}] | {self.info_unidades_dxf}"
             )
         )
@@ -472,7 +472,7 @@ class AppSlicerCNC:
             if ly <= 0 or lz <= 0:
                 raise ValueError()
         except ValueError:
-            messagebox.showerror("Área inválida", "Ingresa dimensiones válidas mayores a 0 para Y y Z.")
+            messagebox.showerror("Invalid area", "Enter valid dimensions greater than 0 for Y and Z.")
             return
 
         self.limite_y_mm = ly
@@ -503,7 +503,7 @@ class AppSlicerCNC:
         self.btn_eliminar_corte.config(state=estado if self._obtener_indice_corte_seleccionado() is not None else tk.DISABLED)
         self.chk_cierre_manual.config(state=estado)
         self.pendiente_corte_diag_p1 = None
-        self.lbl_estado_corte_diag.config(text="Diagonal: inactiva", fg="#666")
+        self.lbl_estado_corte_diag.config(text="Diagonal: inactive", fg="#666")
         self.invalidar_preview_capas()
         self.dibujar(self.slider_sim.get() if self.lineas else 0)
 
@@ -519,7 +519,7 @@ class AppSlicerCNC:
 
     def _modo_referencia_cortes(self):
         v = (self.referencia_cortes_var.get() or "").strip().lower()
-        if "máquina" in v or "maquina" in v:
+        if "machine" in v:
             return "maquina"
         return "base"
 
@@ -576,25 +576,25 @@ class AppSlicerCNC:
 
     def _actualizar_label_cortes_manuales(self):
         if hasattr(self, "lbl_cortes_manuales"):
-            self.lbl_cortes_manuales.config(text=f"Cortes manuales: {len(self.cortes_manuales)}")
+            self.lbl_cortes_manuales.config(text=f"Manual cuts: {len(self.cortes_manuales)}")
 
     def _descripcion_corte_manual(self, corte, idx):
         tipo = corte.get("tipo", "?")
         if tipo == "Y":
             yb = float(corte.get('meta', {}).get('y', 0.0))
             yv = self._base_y_a_entrada(yb)
-            suf = "maq" if self._modo_referencia_cortes() == "maquina" else "base"
+            suf = "mach" if self._modo_referencia_cortes() == "maquina" else "base"
             return f"{idx+1:02d}. Y = {yv:.3f} [{suf}]"
         if tipo == "Z":
             zb = float(corte.get('meta', {}).get('z', 0.0))
             zv = self._base_z_a_entrada(zb)
-            suf = "maq" if self._modo_referencia_cortes() == "maquina" else "base"
+            suf = "mach" if self._modo_referencia_cortes() == "maquina" else "base"
             return f"{idx+1:02d}. Z = {zv:.3f} [{suf}]"
         if tipo == "2P":
             p1 = corte.get("meta", {}).get("p1", (0.0, 0.0))
             p2 = corte.get("meta", {}).get("p2", (0.0, 0.0))
             return f"{idx+1:02d}. 2P ({p1[0]:.1f},{p1[1]:.1f})→({p2[0]:.1f},{p2[1]:.1f})"
-        return f"{idx+1:02d}. Corte"
+        return f"{idx+1:02d}. Cut"
 
     def _refrescar_lista_cortes_manuales(self):
         if not hasattr(self, "listbox_cortes"):
@@ -652,7 +652,7 @@ class AppSlicerCNC:
             try:
                 y_val = float(self.corte_y_var.get().replace(",", "."))
             except ValueError:
-                messagebox.showerror("Valor inválido", "Ingresa un valor Y válido.")
+                messagebox.showerror("Invalid value", "Enter a valid Y value.")
                 return
             y_base = self._entrada_y_a_base(y_val)
             corte.update({"a": 1.0, "b": 0.0, "c_base": -y_base, "tipo": "Y", "meta": {"y": y_base}})
@@ -660,12 +660,12 @@ class AppSlicerCNC:
             try:
                 z_val = float(self.corte_z_var.get().replace(",", "."))
             except ValueError:
-                messagebox.showerror("Valor inválido", "Ingresa un valor Z válido.")
+                messagebox.showerror("Invalid value", "Enter a valid Z value.")
                 return
             z_base = self._entrada_z_a_base(z_val)
             corte.update({"a": 0.0, "b": 1.0, "c_base": -z_base, "tipo": "Z", "meta": {"z": z_base}})
         else:
-            messagebox.showinfo("Editar 2 puntos", "Para cortes de 2 puntos, elimina y vuelve a crearlo con clics.")
+            messagebox.showinfo("Edit 2-point cut", "For 2-point cuts, delete and recreate it with clicks.")
             return
 
         self.invalidar_preview_capas()
@@ -678,7 +678,7 @@ class AppSlicerCNC:
         try:
             y_val = float(self.corte_y_var.get().replace(",", "."))
         except ValueError:
-            messagebox.showerror("Valor inválido", "Ingresa un valor Y válido para agregar el corte.")
+            messagebox.showerror("Invalid value", "Enter a valid Y value to add the cut.")
             return
         y_base = self._entrada_y_a_base(y_val)
         self.cortes_manuales.append({
@@ -696,7 +696,7 @@ class AppSlicerCNC:
         try:
             z_val = float(self.corte_z_var.get().replace(",", "."))
         except ValueError:
-            messagebox.showerror("Valor inválido", "Ingresa un valor Z válido para agregar el corte.")
+            messagebox.showerror("Invalid value", "Enter a valid Z value to add the cut.")
             return
         z_base = self._entrada_z_a_base(z_val)
         self.cortes_manuales.append({
@@ -712,12 +712,12 @@ class AppSlicerCNC:
         if not self.lineas:
             return
         self.pendiente_corte_diag_p1 = None
-        self.lbl_estado_corte_diag.config(text="Diagonal: selecciona P1", fg="#9C27B0")
+        self.lbl_estado_corte_diag.config(text="Diagonal: select P1", fg="#9C27B0")
 
     def limpiar_cortes_manuales(self):
         self.cortes_manuales = []
         self.pendiente_corte_diag_p1 = None
-        self.lbl_estado_corte_diag.config(text="Diagonal: inactiva", fg="#666")
+        self.lbl_estado_corte_diag.config(text="Diagonal: inactive", fg="#666")
         self.invalidar_preview_capas()
         self._actualizar_label_cortes_manuales()
         self._refrescar_lista_cortes_manuales()
@@ -748,7 +748,7 @@ class AppSlicerCNC:
 
         if self.pendiente_corte_diag_p1 is None:
             self.pendiente_corte_diag_p1 = (y_base, z_base)
-            self.lbl_estado_corte_diag.config(text="Diagonal: selecciona P2", fg="#9C27B0")
+            self.lbl_estado_corte_diag.config(text="Diagonal: select P2", fg="#9C27B0")
             self.dibujar_canvas_total()
             return
 
@@ -758,7 +758,7 @@ class AppSlicerCNC:
 
         linea = self._linea_a_partir_de_dos_puntos(y1, z1, y2, z2)
         if linea is None:
-            messagebox.showwarning("Corte inválido", "Los dos puntos son demasiado cercanos. Reintenta.")
+            messagebox.showwarning("Invalid cut", "The two points are too close. Try again.")
             return
 
         a, b, c = linea
@@ -766,7 +766,7 @@ class AppSlicerCNC:
             "a": a, "b": b, "c_base": c,
             "tipo": "2P", "meta": {"p1": (y1, z1), "p2": (y2, z2)}
         })
-        self.lbl_estado_corte_diag.config(text="Diagonal: inactiva", fg="#666")
+        self.lbl_estado_corte_diag.config(text="Diagonal: inactive", fg="#666")
         self.invalidar_preview_capas()
         self._actualizar_label_cortes_manuales()
         self._refrescar_lista_cortes_manuales()
@@ -809,7 +809,7 @@ class AppSlicerCNC:
         self.btn_editar_capa.config(state=tk.DISABLED)
         self.btn_guardar_batch_carpeta.config(state=tk.DISABLED)
         self.btn_guardar_capa_actual.config(state=tk.DISABLED)
-        self.lbl_capa_preview.config(text="Preview placas YxZ: OFF")
+        self.lbl_capa_preview.config(text="YxZ plate preview: OFF")
 
     def sincronizar_edicion_capa_si_corresponde(self):
         """Si estamos editando una capa, bakea offsets en la geometría y actualiza el modelo de capa."""
@@ -959,13 +959,13 @@ class AppSlicerCNC:
                 y_info = f"Y orig {c['y_min_orig']:.2f}..{c['y_max_orig']:.2f} mm | "
             self.lbl_capa_preview.config(
                 text=(
-                    f"Preview capa {self.capa_preview_idx+1}/{len(self.capas_preview)} | "
+                    f"Layer preview {self.capa_preview_idx+1}/{len(self.capas_preview)} | "
                     f"{y_info}"
                     f"Z orig {c['z_min_orig']:.2f}..{c['z_max_orig']:.2f} mm"
                 )
             )
         else:
-            self.lbl_capa_preview.config(text="Preview placas YxZ: OFF")
+            self.lbl_capa_preview.config(text="YxZ plate preview: OFF")
 
     def activar_vista_total(self):
         self.capa_preview_idx = -1
@@ -1012,27 +1012,27 @@ class AppSlicerCNC:
             self.detener_simulacion_tiempo_real()
         if not self.dividir_en_placas.get() and not self.usar_cortes_manuales.get():
             messagebox.showinfo(
-                "Modo seccionado desactivado",
-                "Activa 'Dividir en placas si excede área' o 'Usar cortes manuales' para generar piezas seccionadas."
+                "Section mode disabled",
+                "Enable 'Split into plates if area is exceeded' or 'Use manual cuts' to generate split parts."
             )
             return
 
         corte_base = self.obtener_trayectoria_corte()
         if not corte_base:
-            messagebox.showwarning("Sin trayectorias", "No hay trayectoria de corte disponible para generar preview por capas.")
+            messagebox.showwarning("No paths", "No cut path available to generate layer preview.")
             return
 
         placa_y = self.limite_y_mm
         placa_z = self.limite_z_mm
         if placa_y <= 0 or placa_z <= 0:
-            messagebox.showerror("Área útil inválida", "Define un área útil Y y Z mayor a 0 para separar por placas.")
+            messagebox.showerror("Invalid usable area", "Set a usable Y and Z area greater than 0 to split by plates.")
             return
         margen_entrada_salida_y = 10.0
         ancho_util_y = placa_y - (2.0 * margen_entrada_salida_y)
         if ancho_util_y <= 1e-9:
             messagebox.showerror(
-                "Área útil Y insuficiente",
-                "El largo Y de placa debe ser mayor a 20 mm para conservar entrada/salida de 10 mm por placa."
+                "Insufficient Y usable area",
+                "The plate Y length must be greater than 20 mm to keep 10 mm entry/exit per plate."
             )
             return
 
@@ -1045,21 +1045,21 @@ class AppSlicerCNC:
             z_vals.extend([zz1, zz2])
 
         if not z_vals:
-            messagebox.showwarning("Sin altura", "No se pudo calcular altura para preview por capas.")
+            messagebox.showwarning("No height", "Could not calculate height for layer preview.")
             return
 
         # Modo cortes manuales: particiona por líneas del usuario y usa flujo normal por pieza.
         if self.usar_cortes_manuales.get():
             if not self.cortes_manuales:
                 messagebox.showinfo(
-                    "Sin cortes manuales",
-                    "Agrega al menos un corte manual (Y, Z o 2 puntos) en la Vista Completa."
+                    "No manual cuts",
+                    "Add at least one manual cut (Y, Z, or 2-point) in Full View."
                 )
                 return
 
             capas = self._construir_capas_desde_cortes_manuales(corte_maquina)
             if not capas:
-                messagebox.showwarning("Sin preview", "No se pudieron generar piezas desde los cortes manuales definidos.")
+                messagebox.showwarning("No preview", "Could not generate parts from the defined manual cuts.")
                 return
 
             self.capas_preview = capas
@@ -1090,7 +1090,7 @@ class AppSlicerCNC:
         ancho_total = max(0.0, y_max - y_min)
         alto_total = max(0.0, z_max - z_min)
         if ancho_total <= 1e-9 and alto_total <= 1e-9:
-            messagebox.showwarning("Geometría nula", "No se pudo detectar ancho/alto de corte para separar por placas.")
+            messagebox.showwarning("Null geometry", "Could not detect cut width/height to split by plates.")
             return
 
         total_cols = max(1, int(math.ceil(max(1e-9, ancho_total) / ancho_util_y)))
@@ -1143,7 +1143,7 @@ class AppSlicerCNC:
                 })
 
         if not capas:
-            messagebox.showwarning("Sin preview", "No se pudo generar ninguna placa visualizable con el área útil YxZ indicada.")
+            messagebox.showwarning("No preview", "Could not generate any viewable plate with the specified YxZ usable area.")
             return
 
         self.capas_preview = capas
@@ -1212,7 +1212,7 @@ class AppSlicerCNC:
 
     def guardar_capa_enfocada(self):
         if self.editando_capa_idx is None:
-            messagebox.showwarning("Sin capa enfocada", "Primero enfoca una capa con 'Editar Capa Actual'.")
+            messagebox.showwarning("No focused layer", "Focus a layer first with 'Auto-edit focused layer'.")
             return
 
         self.sincronizar_edicion_capa_si_corresponde()
@@ -1222,13 +1222,13 @@ class AppSlicerCNC:
                 raise ValueError()
             v_mov_mmin = int(v_corte_mms * 60)
         except ValueError:
-            messagebox.showerror("Error", "La velocidad de corte debe ser un número mayor a 0.")
+            messagebox.showerror("Error", "Cut speed must be a number greater than 0.")
             return
 
-        base = self.nombre_lote_capas.get().strip() or "corte"
-        nombre_sugerido = f"{base}_capa{self.editando_capa_idx+1:02d}.gcode"
+        base = self.nombre_lote_capas.get().strip() or "cut"
+        nombre_sugerido = f"{base}_layer{self.editando_capa_idx+1:02d}.gcode"
         ruta = filedialog.asksaveasfilename(
-            title="Guardar G-Code de capa enfocada",
+            title="Save focused layer G-Code",
             initialfile=nombre_sugerido,
             defaultextension=".gcode",
             filetypes=[("G-Code", "*.gcode")]
@@ -1240,11 +1240,11 @@ class AppSlicerCNC:
         gcode = self._generar_gcode_desde_trayectoria(
             tray,
             v_mov_mmin,
-            encabezado_extra=[f"Capa enfocada {self.editando_capa_idx+1}"]
+            encabezado_extra=[f"Focused layer {self.editando_capa_idx+1}"]
         )
         with open(ruta, "w") as f:
             f.write("\n".join(gcode))
-        messagebox.showinfo("Guardado", f"Capa guardada en:\n{ruta}")
+        messagebox.showinfo("Saved", f"Layer saved to:\n{ruta}")
 
     def guardar_batch_en_carpeta(self):
         if self.editando_capa_idx is not None:
@@ -1261,14 +1261,14 @@ class AppSlicerCNC:
                 raise ValueError()
             v_mov_mmin = int(v_corte_mms * 60)
         except ValueError:
-            messagebox.showerror("Error", "La velocidad de corte debe ser un número mayor a 0.")
+            messagebox.showerror("Error", "Cut speed must be a number greater than 0.")
             return
 
-        carpeta = filedialog.askdirectory(title="Seleccionar carpeta para guardar batch de capas")
+        carpeta = filedialog.askdirectory(title="Select folder to save layer batch")
         if not carpeta:
             return
 
-        base = self.nombre_lote_capas.get().strip() or "corte"
+        base = self.nombre_lote_capas.get().strip() or "cut"
         total = len(self.capas_preview)
         guardados = 0
         for i, capa in enumerate(self.capas_preview, start=1):
@@ -1277,17 +1277,17 @@ class AppSlicerCNC:
                 tray,
                 v_mov_mmin,
                 encabezado_extra=[
-                    f"Batch capas {i}/{total}",
+                    f"Layer batch {i}/{total}",
                     f"Z orig {capa['z_min_orig']:.3f}..{capa['z_max_orig']:.3f}"
                 ]
             )
-            nombre = f"{base}_capa{i:02d}_de_{total:02d}.gcode"
+            nombre = f"{base}_layer{i:02d}_of_{total:02d}.gcode"
             ruta = os.path.join(carpeta, nombre)
             with open(ruta, "w") as f:
                 f.write("\n".join(gcode))
             guardados += 1
 
-        messagebox.showinfo("Batch guardado", f"Se guardaron {guardados} archivos en:\n{carpeta}")
+        messagebox.showinfo("Batch saved", f"Saved {guardados} files in:\n{carpeta}")
 
     def formatear_tiempo(self, segundos):
         total = max(0, int(round(segundos)))
@@ -1317,7 +1317,7 @@ class AppSlicerCNC:
         duraciones = self.calcular_duraciones_trayectoria()
         self.tiempo_total_seg = sum(duraciones)
         self.lbl_tiempo.config(
-            text=f"Tiempo estimado: {self.formatear_tiempo(self.tiempo_total_seg)} | Transcurrido: {self.formatear_tiempo(transcurrido_seg)}"
+            text=f"Estimated time: {self.formatear_tiempo(self.tiempo_total_seg)} | Elapsed: {self.formatear_tiempo(transcurrido_seg)}"
         )
         self.refrescar_info_altura()
 
@@ -1348,12 +1348,12 @@ class AppSlicerCNC:
     def refrescar_info_altura(self):
         info = self.calcular_altura_corte_actual()
         if info is None:
-            self.lbl_altura.config(text="Altura máx corte: -- mm (Zmin -- / Zmax --)")
+            self.lbl_altura.config(text="Max cut height: -- mm (Zmin -- / Zmax --)")
             return
 
         altura, z_min, z_max = info
         self.lbl_altura.config(
-            text=f"Altura máx corte: {altura:.2f} mm (Zmin {z_min:.2f} / Zmax {z_max:.2f})"
+            text=f"Max cut height: {altura:.2f} mm (Zmin {z_min:.2f} / Zmax {z_max:.2f})"
         )
 
     def iniciar_simulacion_tiempo_real(self):
@@ -1362,7 +1362,7 @@ class AppSlicerCNC:
 
         duraciones = self.calcular_duraciones_trayectoria()
         if not duraciones:
-            messagebox.showwarning("Velocidad inválida", "Define una velocidad de corte mayor a 0 mm/s.")
+            messagebox.showwarning("Invalid speed", "Set a cut speed greater than 0 mm/s.")
             return
 
         self.reproduciendo = True
@@ -1963,17 +1963,17 @@ class AppSlicerCNC:
         """Genera líneas de G-code a partir de una trayectoria ya posicionada en coordenadas máquina."""
         gcode = []
         gcode.append(";FLAVOR:Marlin")
-        gcode.append(";TARGET_MACHINE.NAME:Ender-3 CNC Hilo Caliente")
+        gcode.append(";TARGET_MACHINE.NAME:Ender-3 Hot Wire CNC")
         if encabezado_extra:
             for linea in encabezado_extra:
                 gcode.append(f";{linea}")
-        gcode.append("G21 ; Unidades en milimetros")
-        gcode.append("G90 ; Posicionamiento absoluto")
-        gcode.append("M140 S0 ; Apagar temperatura de la cama")
-        gcode.append("M104 S0 ; Apagar temperatura del hotend")
-        gcode.append("M107 ; Apagar ventilador de capa")
-        gcode.append("G92 Y0 Z0 ; Establecer posicion actual como origen (0,0)")
-        gcode.append(";--- INICIO DEL CORTE ---")
+        gcode.append("G21 ; Units in millimeters")
+        gcode.append("G90 ; Absolute positioning")
+        gcode.append("M140 S0 ; Turn off bed temperature")
+        gcode.append("M104 S0 ; Turn off hotend temperature")
+        gcode.append("M107 ; Turn off layer fan")
+        gcode.append("G92 Y0 Z0 ; Set current position as origin (0,0)")
+        gcode.append(";--- CUT START ---")
 
         y_actual, z_actual = 0.0, 0.0
         for (y1, z1, y2, z2, tipo) in trayectoria:
@@ -1986,22 +1986,22 @@ class AppSlicerCNC:
                 gcode.append(f"G1 F{v_mov_mmin} Y{y1_mod} Z{z1_mod}")
 
             if tipo == "entrada":
-                gcode.append("; Entrada 10mm")
+                gcode.append("; 10mm entry")
             elif tipo == "salida":
-                gcode.append("; Salida 10mm")
+                gcode.append("; 10mm exit")
             elif tipo == "retorno_h":
-                gcode.append("; Retorno horizontal a Y de origen")
+                gcode.append("; Horizontal return to origin Y")
             elif tipo == "retorno_v":
-                gcode.append("; Ajuste final en Z para cerrar en origen exacto")
+                gcode.append("; Final Z adjustment to close exactly at origin")
             elif tipo == "union":
-                gcode.append("; Union recta entre segmentos")
+                gcode.append("; Straight union between segments")
             gcode.append(f"G1 F{v_mov_mmin} Y{y2_mod} Z{z2_mod}")
 
             y_actual, z_actual = y2_mod, z2_mod
 
-        gcode.append(";--- FIN DEL CORTE ---")
-        gcode.append(f"G1 F{v_mov_mmin} Y0 Z0 ; Volver suave a la posicion de origen inicial")
-        gcode.append("M84 ; Apagar los motores")
+        gcode.append(";--- CUT END ---")
+        gcode.append(f"G1 F{v_mov_mmin} Y0 Z0 ; Smooth return to initial origin")
+        gcode.append("M84 ; Turn off motors")
         return gcode
 
     def _obtener_segmentos_para_exportar_dxf(self):
@@ -2019,13 +2019,13 @@ class AppSlicerCNC:
         """Exporta la geometría modificada actual a DXF (no G-code)."""
         segmentos = self._obtener_segmentos_para_exportar_dxf()
         if not segmentos:
-            messagebox.showwarning("Sin geometría", "No hay segmentos para exportar a DXF.")
+            messagebox.showwarning("No geometry", "No segments available to export to DXF.")
             return
 
         ruta_dxf = filedialog.asksaveasfilename(
-            title="Guardar DXF Modificado",
+            title="Save Modified DXF",
             defaultextension=".dxf",
-            filetypes=[("Archivos DXF", "*.dxf")]
+            filetypes=[("DXF files", "*.dxf")]
         )
         if not ruta_dxf:
             return
@@ -2046,21 +2046,21 @@ class AppSlicerCNC:
                 agregados += 1
 
             if agregados <= 0:
-                messagebox.showwarning("Sin segmentos válidos", "No se encontraron segmentos válidos para exportar a DXF.")
+                messagebox.showwarning("No valid segments", "No valid segments were found to export to DXF.")
                 return
 
             doc_out.saveas(ruta_dxf)
-            messagebox.showinfo("DXF exportado", f"Se exportó el DXF modificado con {agregados} segmentos.\n\n{ruta_dxf}")
+            messagebox.showinfo("DXF exported", f"Modified DXF exported with {agregados} segments.\n\n{ruta_dxf}")
         except Exception as ex:
-            messagebox.showerror("Error DXF", f"No se pudo exportar el DXF modificado:\n{ex}")
+            messagebox.showerror("DXF error", f"Could not export modified DXF:\n{ex}")
 
     def exportar_gcode_por_capas(self):
         if not self.lineas:
             return
         if not self.dividir_en_placas.get() and not self.usar_cortes_manuales.get():
             messagebox.showinfo(
-                "Modo seccionado desactivado",
-                "Activa 'Dividir en placas si excede área' o 'Usar cortes manuales' para exportar piezas seccionadas."
+                "Section mode disabled",
+                "Enable 'Split into plates if area is exceeded' or 'Use manual cuts' to export split parts."
             )
             return
 
@@ -2080,11 +2080,11 @@ class AppSlicerCNC:
                     raise ValueError()
                 v_mov_mmin = int(v_corte_mms * 60)
             except ValueError:
-                messagebox.showerror("Error", "La velocidad de corte debe ser un número mayor a 0.")
+                messagebox.showerror("Error", "Cut speed must be a number greater than 0.")
                 return
 
             ruta_base = filedialog.asksaveasfilename(
-                title="Guardar lote de G-Codes por cortes manuales",
+                title="Save manual-cut G-Code batch",
                 defaultextension=".gcode",
                 filetypes=[("G-Code", "*.gcode")]
             )
@@ -2102,33 +2102,33 @@ class AppSlicerCNC:
                     tray,
                     v_mov_mmin,
                     encabezado_extra=[
-                        f"Cortes manuales - pieza {i}/{total}",
-                        f"Rango Y original: {capa.get('y_min_orig', 0.0):.3f} .. {capa.get('y_max_orig', 0.0):.3f}",
-                        f"Rango Z original: {capa.get('z_min_orig', 0.0):.3f} .. {capa.get('z_max_orig', 0.0):.3f}"
+                        f"Manual cuts - part {i}/{total}",
+                        f"Original Y range: {capa.get('y_min_orig', 0.0):.3f} .. {capa.get('y_max_orig', 0.0):.3f}",
+                        f"Original Z range: {capa.get('z_min_orig', 0.0):.3f} .. {capa.get('z_max_orig', 0.0):.3f}"
                     ]
                 )
-                ruta_out = os.path.join(base_dir, f"{base_name}_manual_pieza{i:02d}_de_{total:02d}.gcode")
+                ruta_out = os.path.join(base_dir, f"{base_name}_manual_part{i:02d}_of_{total:02d}.gcode")
                 with open(ruta_out, "w") as f:
                     f.write("\n".join(gcode))
                 exportados += 1
 
             messagebox.showinfo(
-                "Exportación manual completada",
-                f"Se generaron {exportados} G-Codes por cortes manuales.\nCarpeta: {base_dir}"
+                "Manual export completed",
+                f"Generated {exportados} G-Codes from manual cuts.\nFolder: {base_dir}"
             )
             return
 
         placa_y = self.limite_y_mm
         placa_z = self.limite_z_mm
         if placa_y <= 0 or placa_z <= 0:
-            messagebox.showerror("Área útil inválida", "Define un área útil Y y Z mayor a 0 para separar por placas.")
+            messagebox.showerror("Invalid usable area", "Set a usable Y and Z area greater than 0 to split by plates.")
             return
         margen_entrada_salida_y = 10.0
         ancho_util_y = placa_y - (2.0 * margen_entrada_salida_y)
         if ancho_util_y <= 1e-9:
             messagebox.showerror(
-                "Área útil Y insuficiente",
-                "El largo Y de placa debe ser mayor a 20 mm para conservar entrada/salida de 10 mm por placa."
+                "Insufficient Y usable area",
+                "The plate Y length must be greater than 20 mm to keep 10 mm entry/exit per plate."
             )
             return
 
@@ -2138,11 +2138,11 @@ class AppSlicerCNC:
                 raise ValueError()
             v_mov_mmin = int(v_corte_mms * 60)
         except ValueError:
-            messagebox.showerror("Error", "La velocidad de corte debe ser un número mayor a 0.")
+            messagebox.showerror("Error", "Cut speed must be a number greater than 0.")
             return
 
         ruta_base = filedialog.asksaveasfilename(
-            title="Guardar lote de G-Codes por placas",
+            title="Save plate G-Code batch",
             defaultextension=".gcode",
             filetypes=[("G-Code", "*.gcode")]
         )
@@ -2152,7 +2152,7 @@ class AppSlicerCNC:
         # Tomamos solo la trayectoria de corte del perfil y la llevamos a coordenadas de máquina actuales.
         corte_base = self.obtener_trayectoria_corte()
         if not corte_base:
-            messagebox.showwarning("Sin trayectorias", "No hay trayectoria de corte disponible para dividir.")
+            messagebox.showwarning("No paths", "No cut path available to split.")
             return
 
         corte_maquina = []
@@ -2164,7 +2164,7 @@ class AppSlicerCNC:
             z_vals.extend([zz1, zz2])
 
         if not z_vals:
-            messagebox.showwarning("Sin altura", "No se pudo calcular altura para división por placas.")
+            messagebox.showwarning("No height", "Could not calculate height for plate splitting.")
             return
 
         ys = []
@@ -2222,16 +2222,16 @@ class AppSlicerCNC:
                     continue
 
                 header = [
-                    f"Lote por placas YxZ - placa {idx_global}/{total_capas}",
-                    f"Area util objetivo (placa): Y={placa_y:.3f} mm | Z={placa_z:.3f} mm",
-                    f"Margen entrada/salida en Y por placa: {margen_entrada_salida_y:.1f} mm por lado",
-                    f"Rango Y original: {capa_y_min:.3f} .. {capa_y_max:.3f} mm",
-                    f"Rango Z original: {capa_z_min:.3f} .. {capa_z_max:.3f} mm",
-                    "Y y Z remapeados a coordenadas locales de placa"
+                    f"YxZ plate batch - plate {idx_global}/{total_capas}",
+                    f"Target usable area (plate): Y={placa_y:.3f} mm | Z={placa_z:.3f} mm",
+                    f"Y entry/exit margin per plate: {margen_entrada_salida_y:.1f} mm per side",
+                    f"Original Y range: {capa_y_min:.3f} .. {capa_y_max:.3f} mm",
+                    f"Original Z range: {capa_z_min:.3f} .. {capa_z_max:.3f} mm",
+                    "Y and Z remapped to local plate coordinates"
                 ]
                 gcode = self._generar_gcode_desde_trayectoria(tray_capa, v_mov_mmin, encabezado_extra=header)
 
-                nombre = f"{base_name}_placa_f{fila+1:02d}_c{col+1:02d}_de_{total_rows:02d}x{total_cols:02d}.gcode"
+                nombre = f"{base_name}_plate_r{fila+1:02d}_c{col+1:02d}_of_{total_rows:02d}x{total_cols:02d}.gcode"
                 ruta_out = os.path.join(base_dir, nombre)
                 with open(ruta_out, "w") as f:
                     f.write("\n".join(gcode))
@@ -2239,16 +2239,16 @@ class AppSlicerCNC:
 
         if exportados == 0:
             messagebox.showwarning(
-                "Sin archivos exportados",
-                "No se pudo generar ninguna placa con geometría válida para el área útil indicada."
+                "No files exported",
+                "Could not generate any plate with valid geometry for the specified usable area."
             )
             return
 
         messagebox.showinfo(
-            "Exportación por placas completada",
-            f"Se generaron {exportados} G-Codes por placas YxZ.\n"
-            f"Placas omitidas sin geometría: {omitidos}.\n"
-            f"Carpeta: {base_dir}"
+            "Plate export completed",
+            f"Generated {exportados} G-Codes by YxZ plates.\n"
+            f"Skipped plates without geometry: {omitidos}.\n"
+            f"Folder: {base_dir}"
         )
 
     def alinear_origen_corte(self):
@@ -2312,7 +2312,7 @@ class AppSlicerCNC:
         try:
             grados = float(texto)
         except ValueError:
-            messagebox.showerror("Grados inválidos", "Ingresa un número válido de grados (ej: 0.5 o 1.25).")
+            messagebox.showerror("Invalid degrees", "Enter a valid degree value (e.g. 0.5 or 1.25).")
             return
 
         if grados == 0:
@@ -2331,11 +2331,11 @@ class AppSlicerCNC:
         try:
             paso = float(texto)
         except ValueError:
-            messagebox.showerror("Paso inválido", "Ingresa un paso válido en mm (ej: 0.1 o 0.25).")
+            messagebox.showerror("Invalid step", "Enter a valid step in mm (e.g. 0.1 or 0.25).")
             return
 
         if paso <= 0:
-            messagebox.showerror("Paso inválido", "El paso debe ser mayor a 0 mm.")
+            messagebox.showerror("Invalid step", "Step must be greater than 0 mm.")
             return
 
         delta = signo * paso
@@ -2357,7 +2357,7 @@ class AppSlicerCNC:
         self.dibujar_canvas_total()
 
     def cargar_dxf(self):
-        ruta_dxf = filedialog.askopenfilename(title="Seleccionar DXF", filetypes=[("Archivos DXF", "*.dxf")])
+        ruta_dxf = filedialog.askopenfilename(title="Select DXF", filetypes=[("DXF files", "*.dxf")])
         if not ruta_dxf: return
 
         self.backup_dxf_completo = None
@@ -2381,7 +2381,7 @@ class AppSlicerCNC:
                 if escala_usuario <= 0:
                     raise ValueError()
             except ValueError:
-                messagebox.showerror("Escala inválida", "La escala de importación DXF debe ser un número mayor a 0.")
+                messagebox.showerror("Invalid scale", "DXF import scale must be a number greater than 0.")
                 return
 
             factor_insunits_aplicado = factor_mm_sugerido if self.usar_insunits_auto.get() else 1.0
@@ -2390,10 +2390,10 @@ class AppSlicerCNC:
             if ins == 0:
                 base_info = "INSUNITS=0 (unitless)"
             else:
-                base_info = f"INSUNITS={ins} (sugerido x{factor_mm_sugerido:.6g})"
+                base_info = f"INSUNITS={ins} (suggested x{factor_mm_sugerido:.6g})"
             modo_ins = "ON" if self.usar_insunits_auto.get() else "OFF"
             self.info_unidades_dxf = (
-                f"{base_info} | auto={modo_ins} | escala={escala_usuario:.6g} | aplicado x{factor_mm:.6g}"
+                f"{base_info} | auto={modo_ins} | scale={escala_usuario:.6g} | applied x{factor_mm:.6g}"
             )
             self.lineas.clear()
             
@@ -2446,19 +2446,19 @@ class AppSlicerCNC:
                                 min_y, max_y = min(min_y, y1, y2), max(max_y, y1, y2)
                                 min_z, max_z = min(min_z, z1, z2), max(max_z, z1, z2)
                         except Exception as spline_err:
-                            print("Error aplanando entidad:", spline_err)
+                            print("Error flattening entity:", spline_err)
 
             if not self.lineas:
                 self.btn_play.config(state=tk.DISABLED)
                 self.btn_stop.config(state=tk.DISABLED)
                 self.btn_preview_capas.config(state=tk.DISABLED)
-                messagebox.showwarning("Vacío o Formato Incorrecto", "No se encontraron líneas, polilíneas, splines o arcos compatibles en el DXF.")
+                messagebox.showwarning("Empty or unsupported format", "No compatible lines, polylines, splines, or arcs were found in the DXF.")
                 return
 
             # Cada DXF nuevo arranca en sentido normal.
             self.corte_invertido = False
             if hasattr(self, "btn_invertir_corte"):
-                self.btn_invertir_corte.config(text="Invertir Dirección de Corte")
+                self.btn_invertir_corte.config(text="Reverse Cut Direction")
 
             ancho = max_y - min_y
             alto = max_z - min_z
@@ -2478,7 +2478,7 @@ class AppSlicerCNC:
             self.refrescar_info_tiempo(0.0)
             
         except Exception as ex:
-            messagebox.showerror("Error", f"No se pudo leer el DXF:\n{ex}")
+            messagebox.showerror("Error", f"Could not read DXF:\n{ex}")
 
     def dibujar_grilla(self):
         t = self._get_work_view_transform()
@@ -2614,8 +2614,8 @@ class AppSlicerCNC:
         # Invertimos el sentido de la trayectoria (mismo corte, camino inverso).
         self.corte_invertido = not self.corte_invertido
         if hasattr(self, "btn_invertir_corte"):
-            suf = " (INVERTIDO)" if self.corte_invertido else ""
-            self.btn_invertir_corte.config(text=f"Invertir Dirección de Corte{suf}")
+            suf = " (REVERSED)" if self.corte_invertido else ""
+            self.btn_invertir_corte.config(text=f"Reverse Cut Direction{suf}")
 
         self.slider_sim.set(0)
         self.dibujar(0)
@@ -2741,24 +2741,24 @@ class AppSlicerCNC:
             self.canvas.create_oval(oy_start-5, oz_start-5, oy_start+5, oz_start+5, fill="orange", outline="black")
 
         if fuera_de_limite:
-            self.btn_exportar.config(state=tk.DISABLED, text="¡Fuera de área!")
+            self.btn_exportar.config(state=tk.DISABLED, text="Out of bounds!")
             if self.dividir_en_placas.get() or self.usar_cortes_manuales.get():
-                self.btn_exportar_capas.config(state=tk.NORMAL, text="3. Generar G-Codes por Placas")
+                self.btn_exportar_capas.config(state=tk.NORMAL, text="3. Generate G-Codes by Plates")
                 self.btn_preview_capas.config(state=tk.NORMAL if self.lineas else tk.DISABLED)
                 self.btn_guardar_batch_carpeta.config(state=tk.NORMAL if self.capas_preview else tk.DISABLED)
             else:
-                self.btn_exportar_capas.config(state=tk.DISABLED, text="Activa seccionado (placas/manual)")
+                self.btn_exportar_capas.config(state=tk.DISABLED, text="Enable section mode (plates/manual)")
                 self.btn_preview_capas.config(state=tk.DISABLED)
                 self.btn_guardar_batch_carpeta.config(state=tk.DISABLED)
             self.btn_guardar_capa_actual.config(state=tk.DISABLED)
         else:
-            self.btn_exportar.config(state=tk.NORMAL, text="2. Generar G-Code")
+            self.btn_exportar.config(state=tk.NORMAL, text="2. Generate G-Code")
             if self.dividir_en_placas.get() or self.usar_cortes_manuales.get():
-                self.btn_exportar_capas.config(state=tk.NORMAL, text="3. Generar G-Codes por Placas")
+                self.btn_exportar_capas.config(state=tk.NORMAL, text="3. Generate G-Codes by Plates")
                 self.btn_preview_capas.config(state=tk.NORMAL if self.lineas else tk.DISABLED)
                 self.btn_guardar_batch_carpeta.config(state=tk.NORMAL if self.capas_preview else tk.DISABLED)
             else:
-                self.btn_exportar_capas.config(state=tk.DISABLED, text="3. Generar G-Codes por Placas")
+                self.btn_exportar_capas.config(state=tk.DISABLED, text="3. Generate G-Codes by Plates")
                 self.btn_preview_capas.config(state=tk.DISABLED)
                 self.btn_guardar_batch_carpeta.config(state=tk.DISABLED)
             self.btn_guardar_capa_actual.config(state=tk.NORMAL if self.editando_capa_idx is not None else tk.DISABLED)
@@ -2767,7 +2767,7 @@ class AppSlicerCNC:
 
     # --- GENERACIÓN DE GCODE ---
     def exportar_gcode(self):
-        ruta_gcode = filedialog.asksaveasfilename(title="Guardar G-Code", defaultextension=".gcode", filetypes=[("G-Code", "*.gcode")])
+        ruta_gcode = filedialog.asksaveasfilename(title="Save G-Code", defaultextension=".gcode", filetypes=[("G-Code", "*.gcode")])
         if not ruta_gcode: return
 
         try:
@@ -2776,19 +2776,19 @@ class AppSlicerCNC:
             v_corte_mms = float(self.vel_corte.get())
             v_mov_mmin = int(v_corte_mms * 60)
         except ValueError:
-            messagebox.showerror("Error", "Las velocidades deben ser números válidos.")
+            messagebox.showerror("Error", "Speeds must be valid numbers.")
             return
 
         gcode = []
         gcode.append(";FLAVOR:Marlin")
-        gcode.append(";TARGET_MACHINE.NAME:Ender-3 CNC Hilo Caliente")
-        gcode.append("G21 ; Unidades en milimetros")
-        gcode.append("G90 ; Posicionamiento absoluto")
-        gcode.append("M140 S0 ; Apagar temperatura de la cama")
-        gcode.append("M104 S0 ; Apagar temperatura del hotend")
-        gcode.append("M107 ; Apagar ventilador de capa")
-        gcode.append("G92 Y0 Z0 ; Establecer posicion actual como origen (0,0)")
-        gcode.append(";--- INICIO DEL CORTE ---")
+        gcode.append(";TARGET_MACHINE.NAME:Ender-3 Hot Wire CNC")
+        gcode.append("G21 ; Units in millimeters")
+        gcode.append("G90 ; Absolute positioning")
+        gcode.append("M140 S0 ; Turn off bed temperature")
+        gcode.append("M104 S0 ; Turn off hotend temperature")
+        gcode.append("M107 ; Turn off layer fan")
+        gcode.append("G92 Y0 Z0 ; Set current position as origin (0,0)")
+        gcode.append(";--- CUT START ---")
 
         # Partimos asumiendo que la máquina está en origen tras G92 Y0 Z0
         y_actual, z_actual = 0.0, 0.0
@@ -2805,27 +2805,27 @@ class AppSlicerCNC:
             
             # Movimiento de corte: Forzamos el F (Feedrate) en cada línea para mantener velocidad constante
             if tipo == "entrada":
-                gcode.append("; Entrada 10mm")
+                gcode.append("; 10mm entry")
             elif tipo == "salida":
-                gcode.append("; Salida 10mm")
+                gcode.append("; 10mm exit")
             elif tipo == "retorno_h":
-                gcode.append("; Retorno horizontal a Y de origen")
+                gcode.append("; Horizontal return to origin Y")
             elif tipo == "retorno_v":
-                gcode.append("; Ajuste final en Z para cerrar en origen exacto")
+                gcode.append("; Final Z adjustment to close exactly at origin")
             elif tipo == "union":
-                gcode.append("; Union recta entre segmentos")
+                gcode.append("; Straight union between segments")
             gcode.append(f"G1 F{v_mov_mmin} Y{y2_mod} Z{z2_mod}")
             
             y_actual, z_actual = y2_mod, z2_mod
 
-        gcode.append(";--- FIN DEL CORTE ---")
-        gcode.append(f"G1 F{v_mov_mmin} Y0 Z0 ; Volver suave a la posicion de origen inicial")
-        gcode.append("M84 ; Apagar los motores")
+        gcode.append(";--- CUT END ---")
+        gcode.append(f"G1 F{v_mov_mmin} Y0 Z0 ; Smooth return to initial origin")
+        gcode.append("M84 ; Turn off motors")
 
         with open(ruta_gcode, 'w') as f:
             f.write("\n".join(gcode))
             
-        messagebox.showinfo("Éxito", "¡G-Code generado correctamente!")
+        messagebox.showinfo("Success", "G-Code generated successfully!")
 
 if __name__ == "__main__":
     root = tk.Tk()
