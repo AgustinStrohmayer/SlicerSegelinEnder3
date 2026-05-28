@@ -1,0 +1,324 @@
+/* SlicerSegelinEnder3 — dark theme.
+ * Token references are substituted by ui/theming/qss.py at load time.
+ */
+
+* {
+    font-family: {{typography.family}};
+    font-size: {{typography.size_body}}px;
+    color: {{color.text}};
+}
+
+QMainWindow, QDialog {
+    background-color: {{color.bg}};
+}
+
+QWidget {
+    background-color: transparent;
+}
+
+/* ============== TITLE / HEADERS ============== */
+QLabel#TitleLabel {
+    font-size: {{typography.size_title}}px;
+    font-weight: 600;
+    color: {{color.text}};
+}
+
+QLabel#MutedLabel, QLabel.muted {
+    color: {{color.muted}};
+    font-size: {{typography.size_small}}px;
+}
+
+/* ============== TOOLBAR ============== */
+QToolBar {
+    background: {{color.surface}};
+    border: none;
+    border-bottom: 1px solid {{color.border}};
+    padding: {{space.xs}}px {{space.sm}}px;
+    spacing: {{space.xs}}px;
+}
+
+QToolBar QToolButton {
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: {{radius.sm}}px;
+    padding: {{space.xs}}px {{space.sm}}px;
+    color: {{color.text}};
+}
+
+QToolBar QToolButton:hover {
+    background: {{color.surface_alt}};
+    border-color: {{color.border}};
+}
+
+QToolBar QToolButton:pressed,
+QToolBar QToolButton:checked {
+    background: {{color.accent}};
+    color: white;
+    border-color: {{color.accent}};
+}
+
+/* ============== MENUBAR ============== */
+QMenuBar {
+    background: {{color.bg}};
+    border-bottom: 1px solid {{color.border}};
+    padding: {{space.xs}}px {{space.sm}}px;
+}
+
+QMenuBar::item {
+    background: transparent;
+    padding: {{space.xs}}px {{space.sm}}px;
+    border-radius: {{radius.sm}}px;
+}
+
+QMenuBar::item:selected {
+    background: {{color.surface_alt}};
+}
+
+QMenu {
+    background: {{color.surface}};
+    border: 1px solid {{color.border}};
+    border-radius: {{radius.md}}px;
+    padding: {{space.xs}}px;
+}
+
+QMenu::item {
+    padding: {{space.xs}}px {{space.md}}px;
+    border-radius: {{radius.sm}}px;
+}
+
+QMenu::item:selected {
+    background: {{color.accent}};
+    color: white;
+}
+
+QMenu::separator {
+    height: 1px;
+    background: {{color.border}};
+    margin: {{space.xs}}px {{space.sm}}px;
+}
+
+/* ============== DOCKS / SIDEBAR ============== */
+QDockWidget {
+    background: {{color.surface}};
+    border: 1px solid {{color.border}};
+    color: {{color.text}};
+    titlebar-close-icon: none;
+    titlebar-normal-icon: none;
+}
+
+QDockWidget::title {
+    background: {{color.surface_alt}};
+    padding: {{space.sm}}px {{space.md}}px;
+    border-bottom: 1px solid {{color.border}};
+    font-weight: 600;
+}
+
+/* ============== STATUS BAR ============== */
+QStatusBar {
+    background: {{color.surface}};
+    border-top: 1px solid {{color.border}};
+    color: {{color.muted}};
+    padding: {{space.xs}}px {{space.md}}px;
+}
+
+QStatusBar::item {
+    border: none;
+}
+
+/* ============== BUTTONS ============== */
+QPushButton {
+    background: {{color.surface_alt}};
+    border: 1px solid {{color.border}};
+    border-radius: {{radius.md}}px;
+    padding: {{space.sm}}px {{space.md}}px;
+    color: {{color.text}};
+    min-height: 28px;
+}
+
+QPushButton:hover {
+    background: {{color.border}};
+}
+
+QPushButton:pressed {
+    background: {{color.bg}};
+}
+
+QPushButton:disabled {
+    color: {{color.muted}};
+    background: {{color.surface}};
+}
+
+QPushButton[role="primary"] {
+    background: {{color.accent}};
+    border-color: {{color.accent}};
+    color: white;
+    font-weight: 600;
+}
+
+QPushButton[role="primary"]:hover {
+    background: {{color.accent_hover}};
+    border-color: {{color.accent_hover}};
+}
+
+QPushButton[role="danger"] {
+    background: {{color.danger}};
+    border-color: {{color.danger}};
+    color: white;
+}
+
+QPushButton[role="ghost"] {
+    background: transparent;
+    border-color: transparent;
+}
+
+QPushButton[role="ghost"]:hover {
+    background: {{color.surface_alt}};
+}
+
+/* ============== INPUTS ============== */
+QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox {
+    background: {{color.bg}};
+    border: 1px solid {{color.border}};
+    border-radius: {{radius.sm}}px;
+    padding: {{space.xs}}px {{space.sm}}px;
+    color: {{color.text}};
+    selection-background-color: {{color.accent}};
+    min-height: 24px;
+}
+
+QLineEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus, QComboBox:focus {
+    border-color: {{color.accent}};
+}
+
+QLineEdit[invalid="true"] {
+    border-color: {{color.danger}};
+}
+
+QComboBox::drop-down {
+    border: none;
+    width: 20px;
+}
+
+/* ============== SLIDERS ============== */
+QSlider::groove:horizontal {
+    height: 4px;
+    background: {{color.border}};
+    border-radius: 2px;
+}
+
+QSlider::handle:horizontal {
+    background: {{color.accent}};
+    width: 14px;
+    height: 14px;
+    margin: -5px 0;
+    border-radius: 7px;
+}
+
+QSlider::handle:horizontal:hover {
+    background: {{color.accent_hover}};
+}
+
+QSlider::sub-page:horizontal {
+    background: {{color.accent}};
+    border-radius: 2px;
+}
+
+/* ============== SCROLLBARS ============== */
+QScrollBar:vertical {
+    background: transparent;
+    width: 10px;
+    margin: 0;
+}
+
+QScrollBar::handle:vertical {
+    background: {{color.border}};
+    border-radius: 5px;
+    min-height: 20px;
+}
+
+QScrollBar::handle:vertical:hover {
+    background: {{color.muted}};
+}
+
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+    height: 0;
+}
+
+QScrollBar:horizontal {
+    background: transparent;
+    height: 10px;
+    margin: 0;
+}
+
+QScrollBar::handle:horizontal {
+    background: {{color.border}};
+    border-radius: 5px;
+    min-width: 20px;
+}
+
+QScrollBar::handle:horizontal:hover {
+    background: {{color.muted}};
+}
+
+QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
+    width: 0;
+}
+
+/* ============== CANVAS ============== */
+QGraphicsView {
+    background: {{color.bg}};
+    border: 1px solid {{color.border}};
+    border-radius: {{radius.md}}px;
+}
+
+/* ============== TOAST ============== */
+QFrame#Toast {
+    background: {{color.surface_alt}};
+    border: 1px solid {{color.border}};
+    border-radius: {{radius.lg}}px;
+    padding: {{space.md}}px {{space.lg}}px;
+}
+
+QFrame#Toast[severity="success"] {
+    border-color: {{color.success}};
+}
+
+QFrame#Toast[severity="warning"] {
+    border-color: {{color.warning}};
+}
+
+QFrame#Toast[severity="danger"] {
+    border-color: {{color.danger}};
+}
+
+/* ============== COMMAND PALETTE ============== */
+QFrame#CommandPalette {
+    background: {{color.surface}};
+    border: 1px solid {{color.border}};
+    border-radius: {{radius.lg}}px;
+}
+
+QFrame#CommandPalette QLineEdit {
+    background: transparent;
+    border: none;
+    border-bottom: 1px solid {{color.border}};
+    border-radius: 0;
+    padding: {{space.md}}px {{space.lg}}px;
+    font-size: {{typography.size_title}}px;
+}
+
+QFrame#CommandPalette QListView {
+    background: transparent;
+    border: none;
+    padding: {{space.xs}}px;
+}
+
+QFrame#CommandPalette QListView::item {
+    padding: {{space.sm}}px {{space.md}}px;
+    border-radius: {{radius.sm}}px;
+}
+
+QFrame#CommandPalette QListView::item:selected {
+    background: {{color.accent}};
+    color: white;
+}
