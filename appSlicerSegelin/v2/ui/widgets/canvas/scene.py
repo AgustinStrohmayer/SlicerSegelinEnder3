@@ -1,0 +1,194 @@
+"""Scene that renders the part, the bed, cut path and simulation state.
+
+The main window assembles a small view-model each refresh and calls
+:meth:`render`. Geometry outside the bed is drawn in the danger colour,
+the cut entry point gets a green marker, manual-cut lines are dashed,
+and during simulation the trajectory is revealed up to the slider's
+fractional position with a moving head marker.
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+
+from PyQt6.QtCore import QLineF, QRectF, Qt
+from PyQt6.QtGui import QBrush, QColor, QPainter, QPainterPath, QPen
+from PyQt6.QtWidgets import QGraphicsScene
+
+from ....core.geometry import Point, Segment, SegmentKind
+
+
+@dataclass(slots=True)
+class ScenePalette:
+    background: str = "#0F1115"
+    grid: str = "#2A3142"
+    axis: str = "#7C5CFF"
+    cut: str = "#7C5CFF"
+    entry: str = "#34D399"
+    exit: str = "#F87171"
+    travel: str = "#8A93A6"
+    union: str = "#F59E0B"
+    danger: str = "#F87171"
+    bed: str = "#3A4256"
+    surface_alt: str = "#1B2230"
+
+
+_KIND_COLOR = {
+    SegmentKind.CUT: "cut",
+    SegmentKind.ENTRY: "entry",
+    SegmentKind.EXIT: "exit",
+    SegmentKind.RETURN_H: "travel",
+    SegmentKind.RETURN_V: "travel",
+    SegmentKind.UNION: "union",
+    SegmentKind.TRAVEL: "travel",
+}
+
+
+@dataclass(slots=True)
+class SceneModel:
+    segments: list[Segment] = field(default_factory=list)
+    trajectory: list[Segment] = field(default_factory=list)
+    progress: float = 0.0  # fractional index into trajectory
+    entry_point: Point | None = None
+    manual_lines: list[tuple[float, float, float]] = field(default_factory=list)
+    bed_y: float = 220.0
+    bed_z: float = 100.0
+    show_bed: bool = True
+    show_grid: bool = True
+
+
+class SlicerScene(QGraphicsScene):
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self.palette = ScenePalette()
+        self._grid_color = QColor(self.palette.grid)
+        self._grid_step = 10.0
+        self._model = SceneModel()
+        self.setBackgroundBrush(QColor(self.palette.background))
+
+    def set_palette(self, palette: ScenePalette) -> None:
+        self.palette = palette
+        self._grid_color = QColor(palette.grid)
+        self.setBackgroundBrush(QColor(palette.background))
+        self.render_model(self._model)
+
+    def render_model(self, model: SceneModel) -> None:
+        self._model = model
+        self.clear()
+        if model.show_bed:
+            self._draw_bed(model)
+        self._draw_segments(model)
+        if model.manual_lines:
+            self._draw_manual_lines(model)
+        if model.trajectory:
+            self._draw_trajectory(model)
+        if model.entry_point is not None:
+            self._draw_entry(model.entry_point)
+
+    # ── pieces ────────────────────────────────────────────────────────
+    def _draw_bed(self, model: SceneModel) -> None:
+        from PyQt6.QtGui import QBrush
+
+        fill = QColor(self.palette.surface_alt)
+        fill.setAlpha(46)
+        pen = QPen(QColor(self.palette.bed), 0, Qt.PenStyle.DashLine)
+        pen.setCosmetic(True)
+        item = self.addRect(QRectF(0, 0, model.bed_y, model.bed_z), pen, QBrush(fill))
+        item.setZValue(-1)
+
+    def _draw_segments(self, model: SceneModel) -> None:
+        cut_path = QPainterPath()
+        oob_path = QPainterPath()
+        for s in model.segments:
+            target = oob_path if self._out_of_bed(s, model) else cut_path
+            target.moveTo(s.a.y, s.a.z)
+            target.lineTo(s.b.y, s.b.z)
+        cut_pen = QPen(QColor(self.palette.cut), 0)
+        cut_pen.setCosmetic(True)
+        cut_pen.setWidthF(1.4)
+        item = self.addPath(cut_path, cut_pen)
+        item.setZValue(1)
+        oob_pen = QPen(QColor(self.palette.danger), 0)
+        oob_pen.setCosmetic(True)
+        oob_pen.setWidthF(1.6)
+        self.addPath(oob_path, oob_pen).setZValue(2)
+
+    def _out_of_bed(self, s: Segment, model: SceneModel) -> bool:
+        if not model.show_bed:
+            return False
+        for p in (s.a, s.b):
+            if p.y < -1e-6 or p.y > model.bed_y + 1e-6 or p.z < -1e-6 or p.z > model.bed_z + 1e-6:
+                return True
+        return False
+
+    def _draw_manual_lines(self, model: SceneModel) -> None:
+        pen = QPen(QColor(self.palette.union), 0, Qt.PenStyle.DashLine)
+        pen.setCosmetic(True)
+        diag = max(model.bed_y, model.bed_z) * 4
+        for a, b, c in model.manual_lines:
+            # a*y + b*z + c = 0 → draw a long clipped line across the bed
+            if abs(b) > abs(a):  # mostly horizontal
+                y0, y1 = -diag, diag
+                z0 = (-c - a * y0) / b
+                z1 = (-c - a * y1) / b
+            else:
+                z0, z1 = -diag, diag
+                y0 = (-c - b * z0) / a if abs(a) > 1e-12 else 0.0
+                y1 = (-c - b * z1) / a if abs(a) > 1e-12 else 0.0
+            self.addLine(QLineF(y0, z0, y1, z1), pen).setZValue(3)
+
+    def _draw_trajectory(self, model: SceneModel) -> None:
+        n = len(model.trajectory)
+        progress = max(0.0, min(float(n), model.progress))
+        full = progress >= n
+        drawn_head: Point | None = None
+        for i, s in enumerate(model.trajectory):
+            color = QColor(getattr(self.palette, _KIND_COLOR.get(s.kind, "travel")))
+            if i + 1 <= progress or full:
+                seg = s
+            elif i < progress < i + 1:
+                t = progress - i
+                seg = Segment(s.a, Point(s.a.y + (s.b.y - s.a.y) * t, s.a.z + (s.b.z - s.a.z) * t), s.kind)
+                drawn_head = seg.b
+            else:
+                continue
+            pen = QPen(color, 0)
+            pen.setCosmetic(True)
+            pen.setWidthF(2.2)
+            self.addLine(QLineF(seg.a.y, seg.a.z, seg.b.y, seg.b.z), pen).setZValue(5)
+        if drawn_head is not None:
+            self._draw_dot(drawn_head, self.palette.axis, 2.4)
+
+    def _draw_entry(self, p: Point) -> None:
+        self._draw_dot(p, self.palette.entry, 3.0)
+
+    def _draw_dot(self, p: Point, color: str, r: float) -> None:
+        pen = QPen(QColor(color), 0)
+        pen.setCosmetic(True)
+        brush = QBrush(QColor(color))
+        item = self.addEllipse(QRectF(p.y - r, p.z - r, 2 * r, 2 * r), pen, brush)
+        item.setZValue(10)
+
+    # ── grid background ───────────────────────────────────────────────
+    def drawBackground(self, painter: QPainter, rect: QRectF) -> None:
+        super().drawBackground(painter, rect)
+        if not self._model.show_grid:
+            return
+        pen = QPen(self._grid_color, 0)
+        pen.setCosmetic(True)
+        painter.setPen(pen)
+        step = self._grid_step
+        x = int(rect.left() / step) * step
+        lines = []
+        while x <= rect.right():
+            lines.append(QLineF(x, rect.top(), x, rect.bottom()))
+            x += step
+        y = int(rect.top() / step) * step
+        while y <= rect.bottom():
+            lines.append(QLineF(rect.left(), y, rect.right(), y))
+            y += step
+        painter.drawLines(lines)
+        axis_pen = QPen(QColor(self.palette.axis), 0)
+        axis_pen.setCosmetic(True)
+        painter.setPen(axis_pen)
+        painter.drawLine(QLineF(rect.left(), 0.0, rect.right(), 0.0))
+        painter.drawLine(QLineF(0.0, rect.top(), 0.0, rect.bottom()))
