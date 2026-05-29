@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from PyQt6.QtCore import QPropertyAnimation, QTimer, Qt
+from PyQt6.QtCore import QPropertyAnimation, Qt, QTimer
 from PyQt6.QtGui import QMouseEvent
 from PyQt6.QtWidgets import QFrame, QGraphicsOpacityEffect, QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
@@ -52,7 +52,7 @@ class ToastHost(QWidget):
         if severity != "danger":
             QTimer.singleShot(duration_ms, toast.fade_out)
 
-    def _remove(self, toast: "_Toast") -> None:
+    def _remove(self, toast: _Toast) -> None:
         self._layout.removeWidget(toast)
         toast.deleteLater()
         self._reposition()

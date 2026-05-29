@@ -22,7 +22,7 @@ _SNAP_TOL = 1e-6
 
 
 def _key(p: Point, tol: float) -> tuple[int, int]:
-    return (int(round(p.y / tol)), int(round(p.z / tol)))
+    return (round(p.y / tol), round(p.z / tol))
 
 
 def chain_segments(segments: list[Segment], tol: float = _SNAP_TOL) -> list[Path]:

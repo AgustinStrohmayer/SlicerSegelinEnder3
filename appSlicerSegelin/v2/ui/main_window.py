@@ -1,32 +1,34 @@
 """Main application window.
 
-Hosts the canvas, dock widgets (sidebar / inspector / timeline),
-menubar, toolbar and status bar. State of the world lives in
-``Project``; this class only translates user gestures into commands.
+Assembles the sidebar (all transform/cut/export controls), the central
+canvas, the bottom simulation timeline, toolbar, menus, command palette
+and toast notifications, and wires them to a :class:`ProjectController`.
 """
 from __future__ import annotations
 
-from PyQt6.QtCore import Qt
+import time
+
+from PyQt6.QtCore import QSize, Qt, QTimer
 from PyQt6.QtGui import QAction, QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
     QDockWidget,
     QFileDialog,
-    QLabel,
     QMainWindow,
+    QSizePolicy,
     QToolBar,
-    QVBoxLayout,
     QWidget,
 )
 
-from ..core.commands import CommandStack, FunctionCommand
-from ..core.errors import DxfImportError
-from ..core.project import Project
+from ..core.geometry import Point
+from .controllers.project_controller import ProjectController
 from .theming.icons import get_icon
 from .theming.qss import render_qss
 from .theming.tokens import ThemeName, get_tokens
 from .widgets.canvas.graphics_view import CanvasView
-from .widgets.canvas.scene import SlicerScene
+from .widgets.canvas.scene import SceneModel, ScenePalette, SlicerScene
 from .widgets.command_palette import CommandEntry, CommandPalette, CommandRegistry
+from .widgets.sidebar.sidebar import Sidebar
+from .widgets.timeline.timeline import Timeline
 from .widgets.toast import ToastHost
 
 
@@ -34,222 +36,215 @@ class MainWindow(QMainWindow):
     def __init__(self, initial_theme: ThemeName = "dark") -> None:
         super().__init__()
         self.setWindowTitle("SlicerSegelinEnder3")
-        self.resize(1440, 900)
-        self.setMinimumSize(1024, 720)
-
-        self.project = Project()
-        self.history = CommandStack()
+        self.resize(1500, 940)
+        self.setMinimumSize(1080, 720)
         self.theme: ThemeName = initial_theme
+
+        self.controller = ProjectController()
 
         # Canvas
         self.scene = SlicerScene(self)
         self.view = CanvasView(self)
         self.view.setScene(self.scene)
-        self._apply_canvas_palette()
+        self.view.clicked.connect(self._on_canvas_click)
         self.setCentralWidget(self.view)
+        self._apply_scene_palette()
 
-        # Toasts overlay
+        # Toasts + palette
         self.toasts = ToastHost(self)
-
-        # Command palette
         self.registry = CommandRegistry()
         self.palette = CommandPalette(self, self.registry)
 
-        # Build chrome
+        # Docks
+        self._build_sidebar()
+        self._build_timeline()
+
+        # Chrome
         self._build_toolbar()
         self._build_menus()
         self._build_status_bar()
-        self._build_docks()
         self._register_commands()
+
+        # Simulation timer
+        self._sim_timer = QTimer(self)
+        self._sim_timer.setInterval(30)
+        self._sim_timer.timeout.connect(self._on_sim_tick)
+        self._sim_start = 0.0
+        self._sim_total = 0.0
+
+        # Diagonal-cut picking state
+        self._picking_diagonal = False
+        self._diag_first: Point | None = None
+
+        # Wire controller
+        self.controller.changed.connect(self._refresh_canvas)
+        self.controller.changed.connect(self._refresh_info)
+        self.controller.info_changed.connect(self._refresh_info)
+        self.controller.layers_changed.connect(self._refresh_canvas)
+        self.controller.notify.connect(self._on_notify)
 
         QShortcut(QKeySequence("Ctrl+K"), self).activated.connect(self.palette.open)
 
-        # Welcome
-        self.toasts.show_toast(
-            "Welcome to v2",
-            "Press Ctrl+K to open the command palette.",
-            severity="info",
-        )
+        self._refresh_canvas()
+        self._refresh_info()
+        self.toasts.show_toast("Welcome", "Load a DXF (Ctrl+O) — Ctrl+K for commands.", "info")
 
-    # ─────────────────────────── chrome ───────────────────────────
+    # ── docks ─────────────────────────────────────────────────────────
+    def _build_sidebar(self) -> None:
+        self.sidebar = Sidebar(self.controller, self)
+        self.sidebar.import_requested.connect(self._on_import)
+        self.sidebar.export_gcode_requested.connect(self._on_export_gcode)
+        self.sidebar.export_dxf_requested.connect(self._on_export_dxf)
+        self.sidebar.export_batch_requested.connect(self._on_export_batch)
+        self.sidebar.diagonal_requested.connect(self._start_diagonal_pick)
+        dock = QDockWidget("Workspace", self)
+        dock.setObjectName("SidebarDock")
+        dock.setWidget(self.sidebar)
+        dock.setFeatures(QDockWidget.DockWidgetFeature.DockWidgetMovable | QDockWidget.DockWidgetFeature.DockWidgetFloatable)
+        dock.setMinimumWidth(320)
+        self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, dock)
 
+    def _build_timeline(self) -> None:
+        self.timeline = Timeline(self)
+        self.timeline.play_toggled.connect(self._on_play_toggled)
+        self.timeline.scrubbed.connect(lambda _v: self._on_scrub())
+        dock = QDockWidget("Simulation", self)
+        dock.setObjectName("TimelineDock")
+        dock.setWidget(self.timeline)
+        dock.setFeatures(QDockWidget.DockWidgetFeature.DockWidgetMovable)
+        self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, dock)
+
+    # ── chrome ────────────────────────────────────────────────────────
     def _build_toolbar(self) -> None:
-        bar = QToolBar("Main toolbar", self)
+        bar = QToolBar("Main", self)
         bar.setMovable(False)
-        bar.setIconSize(self._icon_size())
+        bar.setIconSize(QSize(18, 18))
         self.addToolBar(Qt.ToolBarArea.TopToolBarArea, bar)
         self._toolbar = bar
+        col = get_tokens(self.theme).color.text
 
-        accent_color = get_tokens(self.theme).color.text
-
-        def act(name: str, label: str, slot, shortcut: str | None = None) -> QAction:
-            a = QAction(get_icon(name, accent_color), label, self)
+        def act(name, label, slot, shortcut=None):
+            a = QAction(get_icon(name, col), label, self)
             a.triggered.connect(slot)
             if shortcut:
                 a.setShortcut(shortcut)
             bar.addAction(a)
             return a
 
-        act("folder-open", "Import DXF", self.action_import_dxf, "Ctrl+O")
-        act("save", "Save project", self.action_save_project, "Ctrl+S")
+        act("folder-open", "Import DXF", self._on_import_dialog, "Ctrl+O")
+        act("save", "Export G-code", self._on_export_gcode, "Ctrl+E")
         bar.addSeparator()
-        act("undo", "Undo", self.action_undo, "Ctrl+Z")
-        act("redo", "Redo", self.action_redo, "Ctrl+Shift+Z")
+        act("undo", "Undo", self._on_undo, "Ctrl+Z")
+        act("redo", "Redo", self._on_redo, "Ctrl+Shift+Z")
         bar.addSeparator()
-        act("rotate-ccw", "Rotate −90°", lambda: self.action_rotate(-90))
-        act("rotate-cw", "Rotate +90°", lambda: self.action_rotate(90))
-        act("flip-horizontal", "Mirror horizontal", self.action_mirror_h)
-        act("flip-vertical", "Mirror vertical", self.action_mirror_v)
-        bar.addSeparator()
-
-        from PyQt6.QtWidgets import QSizePolicy
-
+        act("rotate-ccw", "Rotate −90°", lambda: self.controller.rotate(-90))
+        act("rotate-cw", "Rotate +90°", lambda: self.controller.rotate(90))
+        act("flip-horizontal", "Mirror V", self.controller.mirror_vertical)
+        act("flip-vertical", "Mirror H", self.controller.mirror_horizontal)
         spacer = QWidget(self)
         spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         bar.addWidget(spacer)
-
         act("command", "Command palette (Ctrl+K)", self.palette.open)
-        self._theme_action = act(
-            "moon" if self.theme == "light" else "sun",
-            "Toggle theme",
-            self.action_toggle_theme,
-        )
+        self._theme_action = act("moon" if self.theme == "light" else "sun", "Toggle theme", self._toggle_theme, "Ctrl+T")
 
     def _build_menus(self) -> None:
         mb = self.menuBar()
 
-        def add(menu, text: str, slot, shortcut: str | None = None) -> QAction:
-            action = QAction(text, self)
+        def add(menu, text, slot, shortcut=None):
+            a = QAction(text, self)
             if shortcut:
-                action.setShortcut(QKeySequence(shortcut))
-            action.triggered.connect(slot)
-            menu.addAction(action)
-            return action
+                a.setShortcut(QKeySequence(shortcut))
+            a.triggered.connect(slot)
+            menu.addAction(a)
 
-        file_menu = mb.addMenu("&File")
-        add(file_menu, "Import DXF…", self.action_import_dxf, "Ctrl+O")
-        add(file_menu, "Save Project…", self.action_save_project, "Ctrl+S")
-        add(file_menu, "Open Project…", self.action_open_project)
-        add(file_menu, "Export G-code…", self.action_export_gcode, "Ctrl+E")
-        file_menu.addSeparator()
-        add(file_menu, "Exit", self.close, "Ctrl+Q")
+        m = mb.addMenu("&File")
+        add(m, "Import DXF…", self._on_import_dialog, "Ctrl+O")
+        add(m, "Open Project…", self._on_open_project)
+        add(m, "Save Project…", self._on_save_project, "Ctrl+S")
+        m.addSeparator()
+        add(m, "Export G-code…", self._on_export_gcode, "Ctrl+E")
+        add(m, "Export modified DXF…", self._on_export_dxf)
+        add(m, "Export plates batch…", self._on_export_batch)
+        m.addSeparator()
+        add(m, "Exit", self.close, "Ctrl+Q")
 
-        edit_menu = mb.addMenu("&Edit")
-        add(edit_menu, "Undo", self.action_undo, "Ctrl+Z")
-        add(edit_menu, "Redo", self.action_redo, "Ctrl+Shift+Z")
+        m = mb.addMenu("&Edit")
+        add(m, "Undo", self._on_undo, "Ctrl+Z")
+        add(m, "Redo", self._on_redo, "Ctrl+Shift+Z")
 
-        view_menu = mb.addMenu("&View")
-        add(view_menu, "Fit to content", lambda: self.view.fit_to_content(), "F")
-        add(view_menu, "Toggle theme", self.action_toggle_theme, "Ctrl+T")
+        m = mb.addMenu("&Transform")
+        add(m, "Rotate 90°", lambda: self.controller.rotate(90))
+        add(m, "Auto height", self.controller.auto_height)
+        add(m, "Mirror vertical", self.controller.mirror_vertical)
+        add(m, "Mirror horizontal", self.controller.mirror_horizontal)
+        add(m, "Align origin to cut", self.controller.align_origin)
+        add(m, "Reverse cut direction", self.controller.toggle_reverse)
 
-        transform_menu = mb.addMenu("&Transform")
-        add(transform_menu, "Rotate −90°", lambda: self.action_rotate(-90))
-        add(transform_menu, "Rotate +90°", lambda: self.action_rotate(90))
-        add(transform_menu, "Mirror horizontal", self.action_mirror_h)
-        add(transform_menu, "Mirror vertical", self.action_mirror_v)
-        add(transform_menu, "Align to origin", self.action_align_origin)
+        m = mb.addMenu("&View")
+        add(m, "Fit to content", self.view.fit_to_content, "F")
+        add(m, "Toggle theme", self._toggle_theme, "Ctrl+T")
 
     def _build_status_bar(self) -> None:
-        sb = self.statusBar()
-        self._coord_label = QLabel("Y 0.00   Z 0.00")
-        self._coord_label.setProperty("class", "muted")
-        self._count_label = QLabel("0 segments")
-        self._count_label.setProperty("class", "muted")
-        sb.addPermanentWidget(self._coord_label)
-        sb.addPermanentWidget(self._count_label)
-        sb.showMessage(f"Ready · theme: {self.theme}")
-
-    def _build_docks(self) -> None:
-        # Left sidebar
-        sidebar = QWidget(self)
-        sl = QVBoxLayout(sidebar)
-        sl.setContentsMargins(12, 12, 12, 12)
-        sl.setSpacing(12)
-        title = QLabel("Layers & transforms")
-        title.setObjectName("TitleLabel")
-        sl.addWidget(title)
-        hint = QLabel("Import a DXF to begin. The sidebar will populate with transform controls.")
-        hint.setWordWrap(True)
-        hint.setProperty("class", "muted")
-        sl.addWidget(hint)
-        sl.addStretch(1)
-        left_dock = QDockWidget("Workspace", self)
-        left_dock.setWidget(sidebar)
-        left_dock.setFeatures(QDockWidget.DockWidgetFeature.DockWidgetMovable | QDockWidget.DockWidgetFeature.DockWidgetFloatable)
-        self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, left_dock)
-
-        # Right inspector
-        inspector = QWidget(self)
-        il = QVBoxLayout(inspector)
-        il.setContentsMargins(12, 12, 12, 12)
-        title2 = QLabel("Inspector")
-        title2.setObjectName("TitleLabel")
-        il.addWidget(title2)
-        muted = QLabel("Select a segment in the canvas to view its properties.")
-        muted.setWordWrap(True)
-        muted.setProperty("class", "muted")
-        il.addWidget(muted)
-        il.addStretch(1)
-        right_dock = QDockWidget("Inspector", self)
-        right_dock.setWidget(inspector)
-        self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, right_dock)
+        self.statusBar().showMessage(f"Ready · {self.theme}")
 
     def _register_commands(self) -> None:
         r = self.registry
-        r.register(CommandEntry("file.import_dxf", "File: Import DXF…", self.action_import_dxf, "Ctrl+O"))
-        r.register(CommandEntry("file.save_project", "File: Save Project…", self.action_save_project, "Ctrl+S"))
-        r.register(CommandEntry("file.open_project", "File: Open Project…", self.action_open_project))
-        r.register(CommandEntry("file.export_gcode", "File: Export G-code…", self.action_export_gcode, "Ctrl+E"))
-        r.register(CommandEntry("edit.undo", "Edit: Undo", self.action_undo, "Ctrl+Z"))
-        r.register(CommandEntry("edit.redo", "Edit: Redo", self.action_redo, "Ctrl+Shift+Z"))
-        r.register(CommandEntry("transform.rotate_ccw", "Transform: Rotate −90°", lambda: self.action_rotate(-90)))
-        r.register(CommandEntry("transform.rotate_cw", "Transform: Rotate +90°", lambda: self.action_rotate(90)))
-        r.register(CommandEntry("transform.mirror_h", "Transform: Mirror horizontal", self.action_mirror_h))
-        r.register(CommandEntry("transform.mirror_v", "Transform: Mirror vertical", self.action_mirror_v))
-        r.register(CommandEntry("transform.align_origin", "Transform: Align to origin", self.action_align_origin))
-        r.register(CommandEntry("view.fit", "View: Fit to content", lambda: self.view.fit_to_content(), "F"))
-        r.register(CommandEntry("view.toggle_theme", "View: Toggle theme", self.action_toggle_theme, "Ctrl+T"))
+        r.register(CommandEntry("file.import", "File: Import DXF…", self._on_import_dialog, "Ctrl+O"))
+        r.register(CommandEntry("file.open", "File: Open Project…", self._on_open_project))
+        r.register(CommandEntry("file.save", "File: Save Project…", self._on_save_project, "Ctrl+S"))
+        r.register(CommandEntry("file.gcode", "File: Export G-code…", self._on_export_gcode, "Ctrl+E"))
+        r.register(CommandEntry("file.dxf", "File: Export modified DXF…", self._on_export_dxf))
+        r.register(CommandEntry("file.batch", "File: Export plates batch…", self._on_export_batch))
+        r.register(CommandEntry("edit.undo", "Edit: Undo", self._on_undo, "Ctrl+Z"))
+        r.register(CommandEntry("edit.redo", "Edit: Redo", self._on_redo, "Ctrl+Shift+Z"))
+        r.register(CommandEntry("tf.rot90", "Transform: Rotate 90°", lambda: self.controller.rotate(90)))
+        r.register(CommandEntry("tf.auto", "Transform: Auto height", self.controller.auto_height))
+        r.register(CommandEntry("tf.mv", "Transform: Mirror vertical", self.controller.mirror_vertical))
+        r.register(CommandEntry("tf.mh", "Transform: Mirror horizontal", self.controller.mirror_horizontal))
+        r.register(CommandEntry("tf.align", "Transform: Align origin to cut", self.controller.align_origin))
+        r.register(CommandEntry("tf.rev", "Transform: Reverse cut direction", self.controller.toggle_reverse))
+        r.register(CommandEntry("view.fit", "View: Fit to content", self.view.fit_to_content, "F"))
+        r.register(CommandEntry("view.theme", "View: Toggle theme", self._toggle_theme, "Ctrl+T"))
+        r.register(CommandEntry("preview.gen", "Preview: Generate plates/parts", self.controller.generate_preview))
 
-    # ─────────────────────────── actions ───────────────────────────
+    # ── file dialogs / actions ────────────────────────────────────────
+    def _on_import_dialog(self) -> None:
+        self.sidebar._on_import()
 
-    def action_import_dxf(self) -> None:
+    def _on_import(self, use_units: bool, scale: float) -> None:
         path, _ = QFileDialog.getOpenFileName(self, "Import DXF", filter="DXF files (*.dxf)")
-        if not path:
-            return
-        try:
-            from ..io.dxf_reader import read_dxf
+        if path:
+            self.controller.import_dxf(path, use_units, scale)
+            self.view.fit_to_content()
 
-            segments = read_dxf(path)
-        except DxfImportError as exc:
-            self.toasts.show_toast("DXF import failed", str(exc), severity="danger")
-            return
+    def _on_export_gcode(self) -> None:
+        path, _ = QFileDialog.getSaveFileName(self, "Export G-code", filter="G-code (*.gcode)")
+        if path:
+            self.controller.export_standard_gcode(path)
 
-        previous = list(self.project.segments)
+    def _on_export_dxf(self) -> None:
+        path, _ = QFileDialog.getSaveFileName(self, "Export modified DXF", filter="DXF (*.dxf)")
+        if path:
+            self.controller.export_dxf(path)
 
-        def do() -> None:
-            self.project.replace_segments(segments)
-            self._refresh_scene()
+    def _on_export_batch(self) -> None:
+        folder = QFileDialog.getExistingDirectory(self, "Select folder for plate batch")
+        if folder:
+            self.controller.export_layers_gcode(folder)
 
-        def undo() -> None:
-            self.project.replace_segments(previous)
-            self._refresh_scene()
-
-        self.history.push(FunctionCommand(label="Import DXF", do_fn=do, undo_fn=undo))
-        self.toasts.show_toast("DXF imported", f"{len(segments)} segments", severity="success")
-
-    def action_save_project(self) -> None:
+    def _on_save_project(self) -> None:
         path, _ = QFileDialog.getSaveFileName(self, "Save Project", filter="Slicer project (*.ssp)")
         if not path:
             return
         from ..io.project_io import save
 
         try:
-            save(path, self.project)
-            self.toasts.show_toast("Saved", path, severity="success")
-        except Exception as exc:  # noqa: BLE001
-            self.toasts.show_toast("Save failed", str(exc), severity="danger")
+            save(path, self.controller.project)
+            self.toasts.show_toast("Saved", path, "success")
+        except Exception as exc:
+            self.toasts.show_toast("Save failed", str(exc), "danger")
 
-    def action_open_project(self) -> None:
+    def _on_open_project(self) -> None:
         path, _ = QFileDialog.getOpenFileName(self, "Open Project", filter="Slicer project (*.ssp)")
         if not path:
             return
@@ -257,128 +252,145 @@ class MainWindow(QMainWindow):
 
         try:
             project = load(path)
-        except Exception as exc:  # noqa: BLE001
-            self.toasts.show_toast("Open failed", str(exc), severity="danger")
+        except Exception as exc:
+            self.toasts.show_toast("Open failed", str(exc), "danger")
             return
-        self.project = project
-        self.history.clear()
-        self._refresh_scene()
-        self.toasts.show_toast("Project loaded", path, severity="success")
+        self.controller.project = project
+        self.controller.history.clear()
+        self.controller.layers = []
+        self.controller.focused_layer = -1
+        self.controller.changed.emit()
+        self.controller.info_changed.emit()
+        self.view.fit_to_content()
+        self.toasts.show_toast("Project loaded", path, "success")
 
-    def action_export_gcode(self) -> None:
-        if not self.project.segments:
-            self.toasts.show_toast("Nothing to export", "Import a DXF first.", severity="warning")
+    def _on_undo(self) -> None:
+        if not self.controller.undo():
+            self.toasts.show_toast("Nothing to undo", "", "warning")
+
+    def _on_redo(self) -> None:
+        if not self.controller.redo():
+            self.toasts.show_toast("Nothing to redo", "", "warning")
+
+    # ── diagonal manual-cut picking ───────────────────────────────────
+    def _start_diagonal_pick(self) -> None:
+        if not self.controller.has_geometry:
+            self.toasts.show_toast("Load a DXF first", "", "warning")
             return
-        path, _ = QFileDialog.getSaveFileName(self, "Export G-code", filter="G-code (*.gcode)")
-        if not path:
+        self._picking_diagonal = True
+        self._diag_first = None
+        self.sidebar.set_diagonal_status("Diagonal: click P1 on the canvas")
+
+    def _on_canvas_click(self, scene_y: float, scene_z: float) -> None:
+        if not self._picking_diagonal:
             return
-        from ..io.gcode_writer import emit_gcode
-        from ..services.slicer_service import build_cut_plan
-
-        plan = build_cut_plan(self.project.segments, self.project.machine)
-        try:
-            with open(path, "w", encoding="utf-8") as fh:
-                fh.write(emit_gcode(plan))
-            self.toasts.show_toast("G-code exported", path, severity="success")
-        except Exception as exc:  # noqa: BLE001
-            self.toasts.show_toast("Export failed", str(exc), severity="danger")
-
-    def action_undo(self) -> None:
-        cmd = self.history.undo()
-        if cmd is None:
-            self.toasts.show_toast("Nothing to undo", severity="warning")
-
-    def action_redo(self) -> None:
-        cmd = self.history.redo()
-        if cmd is None:
-            self.toasts.show_toast("Nothing to redo", severity="warning")
-
-    def action_rotate(self, deg: float) -> None:
-        from ..core.transforms import rotate_around_center
-
-        previous = list(self.project.segments)
-        try:
-            rotated = rotate_around_center(previous, deg)
-        except Exception as exc:  # noqa: BLE001
-            self.toasts.show_toast("Cannot rotate", str(exc), severity="warning")
+        # canvas coords are machine coords → convert to base for the cut
+        base = Point(scene_y - self.controller.project.offset_y, scene_z - self.controller.project.offset_z)
+        if self._diag_first is None:
+            self._diag_first = base
+            self.sidebar.set_diagonal_status("Diagonal: click P2")
             return
+        ok = self.controller.add_manual_diagonal(self._diag_first, base)
+        self._picking_diagonal = False
+        self._diag_first = None
+        self.sidebar.set_diagonal_status("Diagonal: inactive" if ok else "Diagonal: failed, retry")
 
-        def do() -> None:
-            self.project.replace_segments(rotated)
-            self._refresh_scene()
+    # ── simulation ────────────────────────────────────────────────────
+    def _on_play_toggled(self, playing: bool) -> None:
+        if playing:
+            traj = self.controller.active_trajectory()
+            self._sim_total = self.controller.estimated_time_s()
+            if self._sim_total <= 0 or not traj:
+                self.timeline.set_play_state(False)
+                return
+            start_fraction = self.timeline.progress_fraction()
+            if start_fraction >= 1.0:
+                start_fraction = 0.0
+            self._sim_start = time.perf_counter() - start_fraction * self._sim_total
+            self._sim_timer.start()
+        else:
+            self._sim_timer.stop()
 
-        def undo() -> None:
-            self.project.replace_segments(previous)
-            self._refresh_scene()
+    def _on_sim_tick(self) -> None:
+        elapsed = time.perf_counter() - self._sim_start
+        fraction = elapsed / self._sim_total if self._sim_total > 0 else 1.0
+        if fraction >= 1.0:
+            fraction = 1.0
+            self._sim_timer.stop()
+            self.timeline.set_play_state(False)
+        self.timeline.set_progress_fraction(fraction)
+        self._refresh_canvas()
+        self._refresh_info()
 
-        self.history.push(FunctionCommand(label=f"Rotate {deg:+g}°", do_fn=do, undo_fn=undo))
+    def _on_scrub(self) -> None:
+        if self._sim_timer.isActive():
+            self._sim_timer.stop()
+            self.timeline.set_play_state(False)
+        self._refresh_canvas()
+        self._refresh_info()
 
-    def action_mirror_h(self) -> None:
-        self._mirror_command(horizontal=True)
+    # ── refresh ───────────────────────────────────────────────────────
+    def _current_view_geometry(self):
+        c = self.controller
+        if 0 <= c.focused_layer < len(c.layers):
+            layer = c.layers[c.focused_layer]
+            return layer.local_segments, layer.trajectory, None, []
+        machine = c.project.machine_segments()
+        traj = c.active_trajectory()
+        entry = traj[0].a if traj else None
+        manual = []
+        if c.project.use_manual_cuts:
+            manual = [cut.to_machine_line(c.project.offset_y, c.project.offset_z) for cut in c.project.manual_cuts]
+        return machine, traj, entry, manual
 
-    def action_mirror_v(self) -> None:
-        self._mirror_command(horizontal=False)
+    def _refresh_canvas(self) -> None:
+        c = self.controller
+        segments, traj, entry, manual = self._current_view_geometry()
+        fraction = self.timeline.progress_fraction()
+        focused = 0 <= c.focused_layer < len(c.layers)
+        model = SceneModel(
+            segments=segments,
+            trajectory=traj,
+            progress=fraction * len(traj),
+            entry_point=entry,
+            manual_lines=manual,
+            bed_y=c.project.area_y_mm,
+            bed_z=c.project.area_z_mm,
+            show_bed=not focused,
+            show_grid=c.project.view.show_grid,
+        )
+        self.scene.render(model)
 
-    def _mirror_command(self, horizontal: bool) -> None:
-        from ..core.transforms import mirror_horizontal, mirror_vertical
+    def _refresh_info(self) -> None:
+        c = self.controller
+        est = c.estimated_time_s()
+        fraction = self.timeline.progress_fraction()
+        height = c.cut_height()
+        z_min, z_max = (height if height else (None, None))
+        dims = c.dimensions()
+        self.timeline.set_info(est, est * fraction, z_min, z_max, dims)
 
-        previous = list(self.project.segments)
-        new = mirror_horizontal(previous) if horizontal else mirror_vertical(previous)
-        label = "Mirror horizontal" if horizontal else "Mirror vertical"
+    # ── notifications + theme ─────────────────────────────────────────
+    def _on_notify(self, title: str, body: str, severity: str) -> None:
+        self.toasts.show_toast(title, body, severity)  # type: ignore[arg-type]
 
-        def do() -> None:
-            self.project.replace_segments(new)
-            self._refresh_scene()
+    def _apply_scene_palette(self) -> None:
+        t = get_tokens(self.theme).color
+        self.scene.set_palette(
+            ScenePalette(
+                background=t.bg, grid=t.border, axis=t.accent, cut=t.accent,
+                entry=t.success, exit=t.danger, travel=t.muted, union=t.warning, danger=t.danger,
+            )
+        )
 
-        def undo() -> None:
-            self.project.replace_segments(previous)
-            self._refresh_scene()
-
-        self.history.push(FunctionCommand(label=label, do_fn=do, undo_fn=undo))
-
-    def action_align_origin(self) -> None:
-        from ..core.transforms import align_to_origin
-
-        previous = list(self.project.segments)
-        new = align_to_origin(previous)
-
-        def do() -> None:
-            self.project.replace_segments(new)
-            self._refresh_scene()
-
-        def undo() -> None:
-            self.project.replace_segments(previous)
-            self._refresh_scene()
-
-        self.history.push(FunctionCommand(label="Align to origin", do_fn=do, undo_fn=undo))
-
-    def action_toggle_theme(self) -> None:
+    def _toggle_theme(self) -> None:
         self.theme = "light" if self.theme == "dark" else "dark"
-        app = self._app()
+        from PyQt6.QtWidgets import QApplication
+
+        app = QApplication.instance()
         if app is not None:
             app.setStyleSheet(render_qss(self.theme))
             app.setProperty("theme", self.theme)
-        self._apply_canvas_palette()
+        self._apply_scene_palette()
+        self._refresh_canvas()
         self.statusBar().showMessage(f"Theme: {self.theme}", 2000)
-        self.toasts.show_toast(f"Theme: {self.theme}", severity="info", duration_ms=1500)
-
-    # ─────────────────────────── helpers ───────────────────────────
-
-    def _refresh_scene(self) -> None:
-        self.scene.render_segments(self.project.segments)
-        self._count_label.setText(f"{len(self.project.segments)} segments")
-        self.view.fit_to_content()
-
-    def _apply_canvas_palette(self) -> None:
-        tokens = get_tokens(self.theme)
-        self.scene.set_palette(background=tokens.color.bg, grid=tokens.color.border)
-
-    def _icon_size(self):
-        from PyQt6.QtCore import QSize
-
-        return QSize(18, 18)
-
-    def _app(self):
-        from PyQt6.QtWidgets import QApplication
-
-        return QApplication.instance()

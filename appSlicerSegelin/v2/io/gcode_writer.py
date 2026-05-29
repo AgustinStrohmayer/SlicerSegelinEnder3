@@ -16,7 +16,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from ..core.cutplan import CutPlan
-from ..core.geometry import Segment, SegmentKind
+from ..core.geometry import SegmentKind
 from ..core.machine import MachineProfile
 
 _KIND_COMMENT = {

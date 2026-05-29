@@ -9,8 +9,8 @@ lives in one place and every transform is composable.
 from __future__ import annotations
 
 import math
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Iterable
 
 from .errors import GeometryError
 from .geometry import BBox, Point, Segment
@@ -34,7 +34,7 @@ class Affine2D:
     def apply(self, p: Point) -> Point:
         return Point(self.a * p.y + self.b * p.z + self.tx, self.c * p.y + self.d * p.z + self.tz)
 
-    def then(self, other: "Affine2D") -> "Affine2D":
+    def then(self, other: Affine2D) -> Affine2D:
         """Return ``other ∘ self`` so ``self.then(other).apply(p)`` reads
         as "first ``self``, then ``other``"."""
         return Affine2D(
@@ -47,15 +47,15 @@ class Affine2D:
         )
 
     @classmethod
-    def identity(cls) -> "Affine2D":
+    def identity(cls) -> Affine2D:
         return cls()
 
     @classmethod
-    def translation(cls, dy: float, dz: float) -> "Affine2D":
+    def translation(cls, dy: float, dz: float) -> Affine2D:
         return cls(tx=dy, tz=dz)
 
     @classmethod
-    def rotation(cls, angle_deg: float, around: Point | None = None) -> "Affine2D":
+    def rotation(cls, angle_deg: float, around: Point | None = None) -> Affine2D:
         rad = math.radians(angle_deg)
         cos_a = math.cos(rad)
         sin_a = math.sin(rad)
@@ -69,12 +69,12 @@ class Affine2D:
         )
 
     @classmethod
-    def mirror_y(cls, axis_z: float = 0.0) -> "Affine2D":
+    def mirror_y(cls, axis_z: float = 0.0) -> Affine2D:
         """Mirror across a horizontal line ``z == axis_z`` (flips Z)."""
         return cls(d=-1.0, tz=2.0 * axis_z)
 
     @classmethod
-    def mirror_z(cls, axis_y: float = 0.0) -> "Affine2D":
+    def mirror_z(cls, axis_y: float = 0.0) -> Affine2D:
         """Mirror across a vertical line ``y == axis_y`` (flips Y)."""
         return cls(a=-1.0, tx=2.0 * axis_y)
 

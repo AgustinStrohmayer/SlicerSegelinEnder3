@@ -17,7 +17,7 @@ class RecentFiles:
     path: _Path
     items: list[str] = field(default_factory=list)
 
-    def load(self) -> "RecentFiles":
+    def load(self) -> RecentFiles:
         if self.path.exists():
             try:
                 self.items = [p for p in json.loads(self.path.read_text(encoding="utf-8")) if isinstance(p, str)]

@@ -9,7 +9,7 @@ frame with a translation matrix from scratch.
 """
 from __future__ import annotations
 
-from PyQt6.QtCore import QPointF, Qt
+from PyQt6.QtCore import QPointF, Qt, pyqtSignal
 from PyQt6.QtGui import QKeyEvent, QMouseEvent, QPainter, QWheelEvent
 from PyQt6.QtWidgets import QGraphicsView
 
@@ -17,6 +17,9 @@ _ZOOM_FACTOR = 1.15
 
 
 class CanvasView(QGraphicsView):
+    # Emitted on a plain left-click (scene Y, scene Z) — used for picking.
+    clicked = pyqtSignal(float, float)
+
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self.setRenderHints(
@@ -76,6 +79,13 @@ class CanvasView(QGraphicsView):
             super().mousePressEvent(fake)
             event.accept()
             return
+        if (
+            event.button() == Qt.MouseButton.LeftButton
+            and not self._space_held
+            and self.dragMode() != QGraphicsView.DragMode.ScrollHandDrag
+        ):
+            pt = self.mapToScene(event.position().toPoint())
+            self.clicked.emit(pt.x(), pt.y())
         super().mousePressEvent(event)
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:

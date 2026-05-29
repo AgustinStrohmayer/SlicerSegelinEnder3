@@ -6,11 +6,11 @@ registry, so a new feature is added once and discoverable everywhere.
 """
 from __future__ import annotations
 
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
-from typing import Callable, Iterable
 
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QKeyEvent, QShortcut, QKeySequence
+from PyQt6.QtGui import QKeyEvent, QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
     QFrame,
     QLineEdit,

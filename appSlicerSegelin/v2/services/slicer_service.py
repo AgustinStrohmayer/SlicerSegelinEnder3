@@ -1,39 +1,44 @@
-"""Build a :class:`CutPlan` from raw segments.
+"""High-level slicing orchestration.
 
-The legacy app inlined this orchestration into the UI class. Here
-the service is plain functions so the UI tests can call them without
-spinning up Qt.
+Turns a :class:`Project` into trajectories, layers and cut plans by
+composing the pure ``core`` building blocks. UI controllers call these
+functions; they never touch Qt and are fully unit-testable.
 """
 from __future__ import annotations
 
 from ..core.cutplan import CutPlan
-from ..core.geometry import Segment, SegmentKind
+from ..core.geometry import Segment
 from ..core.machine import MachineProfile
-from ..core.pathing import chain_segments, flatten, order_paths
+from ..core.plates import Layer, partition_by_manual_cuts, split_into_plates
+from ..core.project import Project
+from ..core.trajectory import build_full_trajectory
 
 
-def build_cut_plan(
-    segments: list[Segment],
-    machine: MachineProfile,
-    *,
-    notes: tuple[str, ...] = (),
-) -> CutPlan:
-    """Chain disjoint segments into paths, then order them greedily.
+def standard_trajectory(project: Project) -> list[Segment]:
+    """Full machine trajectory (entry → cut → exit → returns) for the part."""
+    machine = project.machine_segments()
+    return build_full_trajectory(machine, add_unions=False, reverse=project.reverse_cut)
 
-    The order is deterministic — given the same input, we always
-    produce the same plan. The legacy app's greedy ordering was
-    order-dependent on floating-point tie-breaks, which made golden
-    tests impossible.
-    """
-    if not segments:
-        return CutPlan(segments=(), machine=machine, notes=notes)
-    paths = chain_segments(segments)
-    paths = order_paths(paths)
-    ordered = flatten(paths)
-    # Force every segment to a uniform kind for the standard slice;
-    # plate-split / manual cut flows assign tags before reaching here.
-    tagged = [
-        Segment(s.a, s.b, s.kind if s.kind != SegmentKind.CUT else SegmentKind.CUT)
-        for s in ordered
-    ]
-    return CutPlan(segments=tuple(tagged), machine=machine, notes=notes)
+
+def build_layers(project: Project) -> list[Layer]:
+    """Split into plates or partition by manual cuts, depending on mode."""
+    machine = project.machine_segments()
+    if project.use_manual_cuts:
+        return partition_by_manual_cuts(
+            machine,
+            project.manual_cuts,
+            project.offset_y,
+            project.offset_z,
+            auto_close=project.auto_close_manual,
+        )
+    if project.split_into_plates:
+        return split_into_plates(machine, project.area_y_mm, project.area_z_mm)
+    return []
+
+
+def cut_plan(segments: list[Segment], machine: MachineProfile, notes: tuple[str, ...] = ()) -> CutPlan:
+    return CutPlan(segments=tuple(segments), machine=machine, notes=notes)
+
+
+def standard_cut_plan(project: Project) -> CutPlan:
+    return cut_plan(standard_trajectory(project), project.machine)

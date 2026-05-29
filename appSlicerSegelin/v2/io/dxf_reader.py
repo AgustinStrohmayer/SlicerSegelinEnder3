@@ -26,8 +26,34 @@ from ..core.geometry import Point, Segment, SegmentKind
 
 @dataclass(slots=True)
 class DxfReadOptions:
-    sagitta_mm: float = 0.2  # flattening tolerance for arcs/splines
+    sagitta_mm: float = 0.1  # flattening tolerance for arcs/splines (legacy used 0.1)
     arc_min_segments: int = 8
+    apply_units: bool = True  # auto-convert via $INSUNITS
+    scale: float = 1.0  # extra user multiplier
+
+
+# DXF $INSUNITS code → millimetres. 0 and 4 are treated as already-mm.
+_UNIT_FACTOR: dict[int, float] = {
+    1: 25.4, 2: 304.8, 3: 1609344.0, 4: 1.0, 5: 10.0, 6: 1000.0, 7: 1000000.0,
+    14: 1e-7, 15: 1e-6, 16: 1e-3, 17: 1.0, 18: 100.0, 19: 1000.0, 20: 1000000.0,
+    24: 0.0000000254, 25: 0.0000254, 26: 914.4,
+}
+
+
+def unit_factor_to_mm(doc) -> float:  # type: ignore[no-untyped-def]
+    """Conversion factor from the DXF's units to millimetres."""
+    try:
+        insunits = int(getattr(doc, "units", 0) or 0)
+    except (TypeError, ValueError):
+        insunits = 0
+    if insunits in (0, 4):
+        return 1.0
+    try:
+        from ezdxf import units as ezunits
+
+        return float(ezunits.conversion_factor(insunits, ezunits.MM))
+    except Exception:
+        return _UNIT_FACTOR.get(insunits, 1.0)
 
 
 def read_dxf(path: str | _Path, opts: DxfReadOptions | None = None) -> list[Segment]:
@@ -45,7 +71,7 @@ def read_dxf(path: str | _Path, opts: DxfReadOptions | None = None) -> list[Segm
 
     try:
         doc = ezdxf.readfile(str(path))
-    except IOError as exc:
+    except OSError as exc:
         raise DxfImportError(f"Cannot open DXF: {exc}") from exc
     except ezdxf.DXFStructureError as exc:
         raise DxfImportError(f"Invalid DXF structure: {exc}") from exc
@@ -72,7 +98,7 @@ def read_dxf(path: str | _Path, opts: DxfReadOptions | None = None) -> list[Segm
                 segments.extend(_flatten_via_path(entity, options))
         except DxfImportError:
             raise
-        except Exception as exc:  # noqa: BLE001 - we wrap with context, never silently
+        except Exception as exc:
             raise DxfImportError(
                 f"Failed to import {kind}: {exc}",
                 entity=kind,
@@ -80,7 +106,19 @@ def read_dxf(path: str | _Path, opts: DxfReadOptions | None = None) -> list[Segm
             ) from exc
 
     # filter degenerate
-    return [s for s in segments if not s.is_degenerate]
+    segments = [s for s in segments if not s.is_degenerate]
+
+    factor = (unit_factor_to_mm(doc) if options.apply_units else 1.0) * options.scale
+    if abs(factor - 1.0) > 1e-12:
+        segments = [
+            Segment(
+                Point(s.a.y * factor, s.a.z * factor),
+                Point(s.b.y * factor, s.b.z * factor),
+                s.kind,
+            )
+            for s in segments
+        ]
+    return segments
 
 
 def _line(entity) -> Segment:  # type: ignore[no-untyped-def]

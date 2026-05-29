@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import pytest
-
 from appSlicerSegelin.v2.core.clipping import clip_segment_to_rect, clip_segments_to_rect
 from appSlicerSegelin.v2.core.geometry import Point, Segment
 

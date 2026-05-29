@@ -9,8 +9,9 @@ align to origin") so a single Ctrl+Z reverses the whole macro.
 """
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Callable, Protocol
+from typing import Protocol
 
 
 class Command(Protocol):

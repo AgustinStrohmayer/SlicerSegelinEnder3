@@ -12,9 +12,9 @@ axis (``x``) is the wire and is not represented here.
 from __future__ import annotations
 
 import math
+from collections.abc import Iterable, Iterator, Sequence
 from dataclasses import dataclass
 from enum import Enum
-from typing import Iterable, Iterator, Sequence
 
 
 class SegmentKind(str, Enum):
@@ -43,10 +43,10 @@ class Point:
         yield self.y
         yield self.z
 
-    def translate(self, dy: float, dz: float) -> "Point":
+    def translate(self, dy: float, dz: float) -> Point:
         return Point(self.y + dy, self.z + dz)
 
-    def distance_to(self, other: "Point") -> float:
+    def distance_to(self, other: Point) -> float:
         return math.hypot(other.y - self.y, other.z - self.z)
 
 
@@ -64,14 +64,14 @@ class Segment:
     def is_degenerate(self) -> bool:
         return self.length <= 1e-9
 
-    def reversed(self) -> "Segment":
+    def reversed(self) -> Segment:
         return Segment(self.b, self.a, self.kind)
 
     def as_tuple(self) -> tuple[float, float, float, float]:
         return (self.a.y, self.a.z, self.b.y, self.b.z)
 
     @classmethod
-    def from_tuple(cls, t: tuple[float, float, float, float], kind: SegmentKind = SegmentKind.CUT) -> "Segment":
+    def from_tuple(cls, t: tuple[float, float, float, float], kind: SegmentKind = SegmentKind.CUT) -> Segment:
         y1, z1, y2, z2 = t
         return cls(Point(y1, z1), Point(y2, z2), kind)
 
@@ -109,7 +109,7 @@ class BBox:
         return Point((self.min_y + self.max_y) / 2.0, (self.min_z + self.max_z) / 2.0)
 
     @classmethod
-    def from_points(cls, points: Iterable[Point]) -> "BBox | None":
+    def from_points(cls, points: Iterable[Point]) -> BBox | None:
         it = iter(points)
         try:
             first = next(it)
@@ -129,7 +129,7 @@ class BBox:
         return cls(min_y, min_z, max_y, max_z)
 
     @classmethod
-    def from_segments(cls, segments: Iterable[Segment]) -> "BBox | None":
+    def from_segments(cls, segments: Iterable[Segment]) -> BBox | None:
         points: list[Point] = []
         for s in segments:
             points.append(s.a)
@@ -169,7 +169,7 @@ class Path:
         points: Sequence[Point],
         closed: bool = False,
         kind: SegmentKind = SegmentKind.CUT,
-    ) -> "Path":
+    ) -> Path:
         if len(points) < 2:
             return cls(segments=(), closed=closed)
         segs = [Segment(points[i], points[i + 1], kind) for i in range(len(points) - 1)]
