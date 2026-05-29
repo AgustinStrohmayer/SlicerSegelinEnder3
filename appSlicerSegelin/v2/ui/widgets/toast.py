@@ -69,6 +69,10 @@ class _Toast(QFrame):
         self.setProperty("severity", severity)
         self.setFrameShape(QFrame.Shape.StyledPanel)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
+        from ..theming.effects import apply_shadow
+        from ..theming.tokens import DARK
+
+        apply_shadow(self, DARK.shadow.md)
 
         outer = QHBoxLayout(self)
         outer.setContentsMargins(12, 8, 12, 8)

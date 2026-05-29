@@ -17,8 +17,8 @@ from ..core.manual_cuts import CutKind, ManualCut
 from ..core.project import SCHEMA_VERSION, Project, ViewState
 
 
-def save(path: str | _Path, project: Project) -> None:
-    payload = {
+def _project_payload(project: Project) -> dict:
+    return {
         "schema_version": SCHEMA_VERSION,
         "machine": asdict(project.machine),
         "view": asdict(project.view),
@@ -34,9 +34,26 @@ def save(path: str | _Path, project: Project) -> None:
         "use_manual_cuts": project.use_manual_cuts,
         "auto_close_manual": project.auto_close_manual,
         "batch_basename": project.batch_basename,
+        "source_dxf_name": project.source_dxf_name,
     }
+
+
+def serialize_to_json(project: Project) -> str:
+    """Pretty-printed JSON representation of ``project``."""
+    return json.dumps(_project_payload(project), indent=2)
+
+
+def deserialize_from_json(raw: str) -> Project:
     try:
-        _Path(path).write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        data = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ProjectIOError(f"Project is not valid JSON: {exc}") from exc
+    return _project_from_data(data)
+
+
+def save(path: str | _Path, project: Project) -> None:
+    try:
+        _Path(path).write_text(serialize_to_json(project), encoding="utf-8")
     except OSError as exc:
         raise ProjectIOError(f"Cannot save project: {exc}") from exc
 
@@ -46,10 +63,10 @@ def load(path: str | _Path) -> Project:
         raw = _Path(path).read_text(encoding="utf-8")
     except OSError as exc:
         raise ProjectIOError(f"Cannot open project: {exc}") from exc
-    try:
-        data = json.loads(raw)
-    except json.JSONDecodeError as exc:
-        raise ProjectIOError(f"Project is not valid JSON: {exc}") from exc
+    return deserialize_from_json(raw)
+
+
+def _project_from_data(data: dict) -> Project:
 
     version = data.get("schema_version", SCHEMA_VERSION)
     if version > SCHEMA_VERSION:
@@ -75,6 +92,8 @@ def load(path: str | _Path) -> Project:
     project.use_manual_cuts = bool(data.get("use_manual_cuts", False))
     project.auto_close_manual = bool(data.get("auto_close_manual", True))
     project.batch_basename = str(data.get("batch_basename", "cut"))
+    if data.get("source_dxf_name"):
+        project.source_dxf_name = str(data["source_dxf_name"])
     return project
 
 

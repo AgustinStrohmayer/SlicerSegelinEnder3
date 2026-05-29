@@ -29,6 +29,7 @@ class ScenePalette:
     union: str = "#F59E0B"
     danger: str = "#F87171"
     bed: str = "#3A4256"
+    surface_alt: str = "#1B2230"
 
 
 _KIND_COLOR = {
@@ -68,9 +69,9 @@ class SlicerScene(QGraphicsScene):
         self.palette = palette
         self._grid_color = QColor(palette.grid)
         self.setBackgroundBrush(QColor(palette.background))
-        self.render(self._model)
+        self.render_model(self._model)
 
-    def render(self, model: SceneModel) -> None:
+    def render_model(self, model: SceneModel) -> None:
         self._model = model
         self.clear()
         if model.show_bed:
@@ -85,9 +86,14 @@ class SlicerScene(QGraphicsScene):
 
     # ── pieces ────────────────────────────────────────────────────────
     def _draw_bed(self, model: SceneModel) -> None:
+        from PyQt6.QtGui import QBrush
+
+        fill = QColor(self.palette.surface_alt)
+        fill.setAlpha(46)
         pen = QPen(QColor(self.palette.bed), 0, Qt.PenStyle.DashLine)
         pen.setCosmetic(True)
-        self.addRect(QRectF(0, 0, model.bed_y, model.bed_z), pen)
+        item = self.addRect(QRectF(0, 0, model.bed_y, model.bed_z), pen, QBrush(fill))
+        item.setZValue(-1)
 
     def _draw_segments(self, model: SceneModel) -> None:
         cut_path = QPainterPath()

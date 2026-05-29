@@ -40,7 +40,7 @@ def test_window_builds(app):
     from appSlicerSegelin.v2.ui.main_window import MainWindow
 
     w = MainWindow()
-    assert w.windowTitle() == "SlicerSegelinEnder3"
+    assert "SlicerSegelinEnder3" in w.windowTitle()
     assert len(list(w.registry.all())) >= 10
 
 
@@ -85,3 +85,52 @@ def test_theme_toggle(app):
     assert w.theme == "light"
     w._toggle_theme()
     assert w.theme == "dark"
+
+
+def test_welcome_visible_until_dxf_loaded(app, demo_dxf):
+    from appSlicerSegelin.v2.ui.main_window import MainWindow
+
+    w = MainWindow()
+    # Welcome screen starts at index 0
+    assert w.central_stack.currentIndex() == 0
+    w.controller.import_dxf(demo_dxf)
+    assert w.central_stack.currentIndex() == 1
+
+
+def test_shortcuts_overlay_open_close(app):
+    from appSlicerSegelin.v2.ui.main_window import MainWindow
+
+    w = MainWindow()
+    w.show()
+    app.processEvents()
+    assert w.shortcuts_overlay is not None
+    w._open_shortcuts_overlay()
+    app.processEvents()
+    assert w.shortcuts_overlay.isVisible()
+    w._open_shortcuts_overlay()  # toggles off
+
+
+def test_vertical_nav_switches_panels(app):
+    from appSlicerSegelin.v2.ui.main_window import MainWindow
+
+    w = MainWindow()
+    w.sidebar.open_section(3)  # plates panel
+    assert w.sidebar.stack.currentIndex() == 3
+
+
+def test_project_archive_round_trip_in_session(app, demo_dxf, tmp_path):
+    """Save .ssproj, open in a fresh window, verify geometry survives."""
+    from appSlicerSegelin.v2.ui.main_window import MainWindow
+
+    w1 = MainWindow()
+    w1.controller.import_dxf(demo_dxf)
+    w1.controller.rotate(45)
+    n_segs = len(w1.controller.project.segments)
+    out = tmp_path / "session.ssproj"
+    assert w1.controller.save_project_archive(str(out), scene=w1.canvas.scene)
+
+    w2 = MainWindow()
+    assert w2.controller.open_project_archive(str(out))
+    assert len(w2.controller.project.segments) == n_segs
+    # Embedded DXF bytes are preserved on the reload.
+    assert w2.controller._source_dxf_bytes is not None

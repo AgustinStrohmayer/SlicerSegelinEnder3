@@ -1,24 +1,22 @@
 """Pannable, zoomable QGraphicsView.
 
-* Middle-click or Space+drag pans.
-* Ctrl+wheel zooms around the cursor (not the centre).
-* ``fit_to_content`` zoom-to-fit the current scene rect.
-
-The legacy Tkinter canvas couldn't do any of this — it redrew every
-frame with a translation matrix from scratch.
+Emits ``cursorMoved(y, z)`` whenever the mouse hovers a position and
+``transformChanged()`` whenever zoom or scroll change — both feed the
+rulers, coord readout and zoom badge.
 """
 from __future__ import annotations
 
 from PyQt6.QtCore import QPointF, Qt, pyqtSignal
-from PyQt6.QtGui import QKeyEvent, QMouseEvent, QPainter, QWheelEvent
+from PyQt6.QtGui import QKeyEvent, QMouseEvent, QPainter, QResizeEvent, QWheelEvent
 from PyQt6.QtWidgets import QGraphicsView
 
 _ZOOM_FACTOR = 1.15
 
 
 class CanvasView(QGraphicsView):
-    # Emitted on a plain left-click (scene Y, scene Z) — used for picking.
     clicked = pyqtSignal(float, float)
+    cursorMoved = pyqtSignal(float, float)
+    transformChanged = pyqtSignal()
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -32,18 +30,23 @@ class CanvasView(QGraphicsView):
         self.setResizeAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        # Y axis is mathematical (up), like the legacy app, so we flip it.
+        self.setMouseTracking(True)
+        self.setFrameShape(QGraphicsView.Shape.NoFrame)
+        # Mathematical Y axis (up), as in the legacy app.
         self.scale(1.0, -1.0)
         self._panning = False
         self._space_held = False
 
+    # ── input ────────────────────────────────────────────────────────
     def wheelEvent(self, event: QWheelEvent) -> None:
         if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
             factor = _ZOOM_FACTOR if event.angleDelta().y() > 0 else 1 / _ZOOM_FACTOR
             self.scale(factor, factor)
+            self.transformChanged.emit()
             event.accept()
             return
         super().wheelEvent(event)
+        self.transformChanged.emit()
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
         if event.key() == Qt.Key.Key_Space and not event.isAutoRepeat():
@@ -88,6 +91,11 @@ class CanvasView(QGraphicsView):
             self.clicked.emit(pt.x(), pt.y())
         super().mousePressEvent(event)
 
+    def mouseMoveEvent(self, event: QMouseEvent) -> None:
+        pt = self.mapToScene(event.position().toPoint())
+        self.cursorMoved.emit(pt.x(), pt.y())
+        super().mouseMoveEvent(event)
+
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
         if event.button() == Qt.MouseButton.MiddleButton and self._panning:
             self._panning = False
@@ -98,6 +106,15 @@ class CanvasView(QGraphicsView):
             return
         super().mouseReleaseEvent(event)
 
+    def resizeEvent(self, event: QResizeEvent) -> None:
+        super().resizeEvent(event)
+        self.transformChanged.emit()
+
+    def scrollContentsBy(self, dx: int, dy: int) -> None:
+        super().scrollContentsBy(dx, dy)
+        self.transformChanged.emit()
+
+    # ── public API ───────────────────────────────────────────────────
     def fit_to_content(self) -> None:
         scene = self.scene()
         if scene is None:
@@ -108,6 +125,19 @@ class CanvasView(QGraphicsView):
         margin = 0.05 * max(rect.width(), rect.height())
         rect.adjust(-margin, -margin, margin, margin)
         self.fitInView(rect, Qt.AspectRatioMode.KeepAspectRatio)
+        self.transformChanged.emit()
+
+    def zoom(self, factor: float) -> None:
+        self.scale(factor, factor)
+        self.transformChanged.emit()
+
+    def reset_zoom(self) -> None:
+        self.resetTransform()
+        self.scale(1.0, -1.0)
+        self.transformChanged.emit()
 
     def cursor_scene_pos(self) -> QPointF:
         return self.mapToScene(self.mapFromGlobal(self.cursor().pos()))
+
+    def zoom_percent(self) -> int:
+        return round(abs(self.transform().m11()) * 100)
