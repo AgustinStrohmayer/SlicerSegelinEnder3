@@ -21,13 +21,16 @@ class Timeline(QWidget):
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
+        self.setObjectName("Timeline")
         lay = QHBoxLayout(self)
-        lay.setContentsMargins(12, 8, 12, 8)
-        lay.setSpacing(12)
+        lay.setContentsMargins(16, 10, 16, 12)
+        lay.setSpacing(14)
 
-        self.btn_play = QPushButton(get_icon("play"), "")
+        self.btn_play = QPushButton(get_icon("play", "#FFFFFF"), "")
+        self.btn_play.setObjectName("PlayButton")
         self.btn_play.setCheckable(True)
-        self.btn_play.setFixedWidth(44)
+        self.btn_play.setFixedSize(34, 34)
+        self.btn_play.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_play.toggled.connect(self._on_play)
         lay.addWidget(self.btn_play)
 
@@ -49,13 +52,13 @@ class Timeline(QWidget):
         lay.addWidget(self.lbl_dims)
 
     def _on_play(self, checked: bool) -> None:
-        self.btn_play.setIcon(get_icon("pause" if checked else "play"))
+        self.btn_play.setIcon(get_icon("pause" if checked else "play", "#FFFFFF"))
         self.play_toggled.emit(checked)
 
     def set_play_state(self, playing: bool) -> None:
         self.btn_play.blockSignals(True)
         self.btn_play.setChecked(playing)
-        self.btn_play.setIcon(get_icon("pause" if playing else "play"))
+        self.btn_play.setIcon(get_icon("pause" if playing else "play", "#FFFFFF"))
         self.btn_play.blockSignals(False)
 
     def set_progress_fraction(self, fraction: float) -> None:

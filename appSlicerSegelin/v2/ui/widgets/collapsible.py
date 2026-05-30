@@ -6,12 +6,13 @@ sidebar tidy on small screens — replaces the legacy scroll-canvas hack.
 from __future__ import annotations
 
 from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import QFrame, QToolButton, QVBoxLayout, QWidget
+from PyQt6.QtWidgets import QFrame, QSizePolicy, QToolButton, QVBoxLayout, QWidget
 
 
 class CollapsibleSection(QWidget):
     def __init__(self, title: str, parent: QWidget | None = None, *, expanded: bool = True) -> None:
         super().__init__(parent)
+        self.setObjectName("SidebarCard")
         self._layout = QVBoxLayout(self)
         self._layout.setContentsMargins(0, 0, 0, 0)
         self._layout.setSpacing(0)
@@ -21,6 +22,7 @@ class CollapsibleSection(QWidget):
         self._toggle.setCheckable(True)
         self._toggle.setChecked(expanded)
         self._toggle.setObjectName("SectionHeader")
+        self._toggle.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self._toggle.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
         self._toggle.setArrowType(Qt.ArrowType.DownArrow if expanded else Qt.ArrowType.RightArrow)
         self._toggle.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -30,8 +32,8 @@ class CollapsibleSection(QWidget):
         self._content = QFrame(self)
         self._content.setObjectName("SectionContent")
         self._content_layout = QVBoxLayout(self._content)
-        self._content_layout.setContentsMargins(8, 8, 8, 12)
-        self._content_layout.setSpacing(8)
+        self._content_layout.setContentsMargins(12, 4, 12, 14)
+        self._content_layout.setSpacing(9)
         self._layout.addWidget(self._content)
         self._content.setVisible(expanded)
 

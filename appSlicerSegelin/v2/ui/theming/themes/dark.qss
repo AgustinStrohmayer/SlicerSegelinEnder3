@@ -1,19 +1,44 @@
 /* SlicerSegelinEnder3 — dark theme.
- * Token references are substituted by ui/theming/qss.py at load time.
+ * Token references in the form color.NAME / space.NAME (wrapped in
+ * double braces) are substituted by ui/theming/qss.py at load time.
+ * This file is structurally identical to light.qss; the palette
+ * difference lives entirely in tokens.py.
  */
 
+/* ============== BASE ============== */
 * {
     font-family: {{typography.family}};
     font-size: {{typography.size_body}}px;
     color: {{color.text}};
+    outline: 0;
 }
 
 QMainWindow, QDialog {
     background-color: {{color.bg}};
 }
 
+/* Default to transparent so nested containers don't double-paint;
+ * every real surface is given an explicit background below. */
 QWidget {
     background-color: transparent;
+}
+
+QToolTip {
+    background: {{color.surface_alt}};
+    color: {{color.text}};
+    border: 1px solid {{color.border}};
+    border-radius: {{radius.sm}}px;
+    padding: {{space.xs}}px {{space.sm}}px;
+}
+
+/* Dock resize handles between panels and the canvas. */
+QMainWindow::separator {
+    background: {{color.bg}};
+    width: 6px;
+    height: 6px;
+}
+QMainWindow::separator:hover {
+    background: {{color.accent}};
 }
 
 /* ============== TITLE / HEADERS ============== */
@@ -23,7 +48,7 @@ QLabel#TitleLabel {
     color: {{color.text}};
 }
 
-QLabel#MutedLabel, QLabel.muted {
+QLabel#MutedLabel, QLabel[class="muted"] {
     color: {{color.muted}};
     font-size: {{typography.size_small}}px;
 }
@@ -33,45 +58,49 @@ QToolBar {
     background: {{color.surface}};
     border: none;
     border-bottom: 1px solid {{color.border}};
-    padding: {{space.xs}}px {{space.sm}}px;
+    padding: {{space.sm}}px {{space.md}}px;
     spacing: {{space.xs}}px;
+}
+
+QToolBar::separator {
+    background: {{color.border}};
+    width: 1px;
+    margin: {{space.xs}}px {{space.sm}}px;
 }
 
 QToolBar QToolButton {
     background: transparent;
     border: 1px solid transparent;
     border-radius: {{radius.sm}}px;
-    padding: {{space.xs}}px {{space.sm}}px;
+    padding: {{space.sm}}px {{space.sm}}px;
     color: {{color.text}};
 }
 
 QToolBar QToolButton:hover {
-    background: {{color.surface_alt}};
-    border-color: {{color.border}};
+    background: {{color.elevated}};
 }
 
 QToolBar QToolButton:pressed,
 QToolBar QToolButton:checked {
-    background: {{color.accent}};
-    color: white;
+    background: {{color.accent_soft}};
     border-color: {{color.accent}};
 }
 
 /* ============== MENUBAR ============== */
 QMenuBar {
-    background: {{color.bg}};
+    background: {{color.surface}};
     border-bottom: 1px solid {{color.border}};
     padding: {{space.xs}}px {{space.sm}}px;
 }
 
 QMenuBar::item {
     background: transparent;
-    padding: {{space.xs}}px {{space.sm}}px;
+    padding: {{space.xs}}px {{space.md}}px;
     border-radius: {{radius.sm}}px;
 }
 
 QMenuBar::item:selected {
-    background: {{color.surface_alt}};
+    background: {{color.elevated}};
 }
 
 QMenu {
@@ -82,13 +111,14 @@ QMenu {
 }
 
 QMenu::item {
-    padding: {{space.xs}}px {{space.md}}px;
+    padding: {{space.sm}}px {{space.lg}}px;
     border-radius: {{radius.sm}}px;
+    color: {{color.text}};
 }
 
 QMenu::item:selected {
     background: {{color.accent}};
-    color: white;
+    color: {{color.on_accent}};
 }
 
 QMenu::separator {
@@ -97,20 +127,58 @@ QMenu::separator {
     margin: {{space.xs}}px {{space.sm}}px;
 }
 
-/* ============== DOCKS / SIDEBAR ============== */
+/* ============== DOCKS ============== */
 QDockWidget {
     background: {{color.surface}};
-    border: 1px solid {{color.border}};
-    color: {{color.text}};
+    color: {{color.muted}};
     titlebar-close-icon: none;
     titlebar-normal-icon: none;
 }
 
 QDockWidget::title {
-    background: {{color.surface_alt}};
-    padding: {{space.sm}}px {{space.md}}px;
+    background: {{color.surface}};
+    padding: {{space.md}}px {{space.lg}}px {{space.sm}}px {{space.lg}}px;
     border-bottom: 1px solid {{color.border}};
-    font-weight: 600;
+    color: {{color.muted}};
+    font-size: {{typography.size_small}}px;
+    font-weight: 700;
+}
+
+/* ============== SIDEBAR ============== */
+QScrollArea#Sidebar {
+    background: {{color.surface}};
+    border: none;
+    border-right: 1px solid {{color.border}};
+}
+/* The scroll viewport + its inner container must paint a real surface,
+ * otherwise the dock composites to black on Windows. */
+QScrollArea#Sidebar > QWidget#qt_scrollarea_viewport,
+QWidget#SidebarBody {
+    background: {{color.surface}};
+}
+
+/* Each collapsible group is a card raised off the sidebar. */
+QWidget#SidebarCard {
+    background: {{color.surface_alt}};
+    border: 1px solid {{color.border_strong}};
+    border-radius: {{radius.lg}}px;
+}
+
+QToolButton#SectionHeader {
+    background: transparent;
+    border: none;
+    color: {{color.text}};
+    font-size: {{typography.size_body}}px;
+    font-weight: 700;
+    padding: {{space.md}}px {{space.md}}px;
+    text-align: left;
+}
+QToolButton#SectionHeader:hover {
+    color: {{color.accent}};
+}
+
+QFrame#SectionContent {
+    background: transparent;
 }
 
 /* ============== STATUS BAR ============== */
@@ -127,63 +195,83 @@ QStatusBar::item {
 
 /* ============== BUTTONS ============== */
 QPushButton {
-    background: {{color.surface_alt}};
-    border: 1px solid {{color.border}};
+    background: {{color.elevated}};
+    border: 1px solid {{color.border_strong}};
     border-radius: {{radius.md}}px;
     padding: {{space.sm}}px {{space.md}}px;
     color: {{color.text}};
-    min-height: 28px;
+    font-weight: 500;
+    min-height: 30px;
 }
 
 QPushButton:hover {
-    background: {{color.border}};
+    border-color: {{color.accent}};
+    color: {{color.accent}};
 }
 
 QPushButton:pressed {
-    background: {{color.bg}};
+    background: {{color.accent_soft}};
+}
+
+QPushButton:checked {
+    background: {{color.accent_soft}};
+    border-color: {{color.accent}};
+    color: {{color.accent}};
+    font-weight: 600;
 }
 
 QPushButton:disabled {
     color: {{color.muted}};
     background: {{color.surface}};
+    border-color: {{color.border}};
 }
 
 QPushButton[role="primary"] {
     background: {{color.accent}};
     border-color: {{color.accent}};
-    color: white;
+    color: {{color.on_accent}};
     font-weight: 600;
 }
 
 QPushButton[role="primary"]:hover {
     background: {{color.accent_hover}};
     border-color: {{color.accent_hover}};
+    color: {{color.on_accent}};
+}
+
+QPushButton[role="primary"]:pressed {
+    background: {{color.accent}};
 }
 
 QPushButton[role="danger"] {
     background: {{color.danger}};
     border-color: {{color.danger}};
-    color: white;
+    color: #FFFFFF;
 }
 
 QPushButton[role="ghost"] {
     background: transparent;
     border-color: transparent;
 }
-
 QPushButton[role="ghost"]:hover {
-    background: {{color.surface_alt}};
+    background: {{color.elevated}};
+    color: {{color.text}};
 }
 
 /* ============== INPUTS ============== */
 QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox {
     background: {{color.bg}};
-    border: 1px solid {{color.border}};
+    border: 1px solid {{color.border_strong}};
     border-radius: {{radius.sm}}px;
     padding: {{space.xs}}px {{space.sm}}px;
     color: {{color.text}};
     selection-background-color: {{color.accent}};
-    min-height: 24px;
+    selection-color: {{color.on_accent}};
+    min-height: 26px;
+}
+
+QLineEdit:hover, QSpinBox:hover, QDoubleSpinBox:hover, QComboBox:hover {
+    border-color: {{color.muted}};
 }
 
 QLineEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus, QComboBox:focus {
@@ -199,41 +287,100 @@ QComboBox::drop-down {
     width: 20px;
 }
 
+QComboBox QAbstractItemView {
+    background: {{color.surface}};
+    border: 1px solid {{color.border}};
+    border-radius: {{radius.sm}}px;
+    selection-background-color: {{color.accent}};
+    selection-color: {{color.on_accent}};
+    padding: {{space.xs}}px;
+}
+
+/* ============== CHECKBOX ============== */
+QCheckBox {
+    background: transparent;
+    color: {{color.text}};
+    spacing: {{space.sm}}px;
+    padding: {{space.xs}}px 0;
+}
+
+QCheckBox::indicator {
+    width: 16px;
+    height: 16px;
+    border-radius: {{radius.sm}}px;
+    border: 1px solid {{color.border_strong}};
+    background: {{color.bg}};
+}
+
+QCheckBox::indicator:hover {
+    border-color: {{color.accent}};
+}
+
+QCheckBox::indicator:checked {
+    background: {{color.accent}};
+    border-color: {{color.accent}};
+}
+
+/* ============== LIST ============== */
+QListWidget {
+    background: {{color.bg}};
+    border: 1px solid {{color.border}};
+    border-radius: {{radius.sm}}px;
+    padding: {{space.xs}}px;
+    outline: 0;
+}
+
+QListWidget::item {
+    padding: {{space.xs}}px {{space.sm}}px;
+    border-radius: {{radius.sm}}px;
+    color: {{color.text}};
+}
+
+QListWidget::item:hover {
+    background: {{color.elevated}};
+}
+
+QListWidget::item:selected {
+    background: {{color.accent}};
+    color: {{color.on_accent}};
+}
+
 /* ============== SLIDERS ============== */
 QSlider::groove:horizontal {
-    height: 4px;
-    background: {{color.border}};
-    border-radius: 2px;
+    height: 5px;
+    background: {{color.border_strong}};
+    border-radius: 3px;
 }
 
 QSlider::handle:horizontal {
-    background: {{color.accent}};
+    background: {{color.surface}};
+    border: 2px solid {{color.accent}};
     width: 14px;
     height: 14px;
-    margin: -5px 0;
-    border-radius: 7px;
+    margin: -6px 0;
+    border-radius: 9px;
 }
 
 QSlider::handle:horizontal:hover {
-    background: {{color.accent_hover}};
+    border-color: {{color.accent_hover}};
 }
 
 QSlider::sub-page:horizontal {
     background: {{color.accent}};
-    border-radius: 2px;
+    border-radius: 3px;
 }
 
 /* ============== SCROLLBARS ============== */
 QScrollBar:vertical {
     background: transparent;
-    width: 10px;
-    margin: 0;
+    width: 11px;
+    margin: 2px;
 }
 
 QScrollBar::handle:vertical {
-    background: {{color.border}};
-    border-radius: 5px;
-    min-height: 20px;
+    background: {{color.border_strong}};
+    border-radius: 4px;
+    min-height: 24px;
 }
 
 QScrollBar::handle:vertical:hover {
@@ -243,17 +390,20 @@ QScrollBar::handle:vertical:hover {
 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
     height: 0;
 }
+QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
+    background: transparent;
+}
 
 QScrollBar:horizontal {
     background: transparent;
-    height: 10px;
-    margin: 0;
+    height: 11px;
+    margin: 2px;
 }
 
 QScrollBar::handle:horizontal {
-    background: {{color.border}};
-    border-radius: 5px;
-    min-width: 20px;
+    background: {{color.border_strong}};
+    border-radius: 4px;
+    min-width: 24px;
 }
 
 QScrollBar::handle:horizontal:hover {
@@ -263,12 +413,36 @@ QScrollBar::handle:horizontal:hover {
 QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
     width: 0;
 }
+QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {
+    background: transparent;
+}
 
 /* ============== CANVAS ============== */
 QGraphicsView {
     background: {{color.bg}};
-    border: 1px solid {{color.border}};
-    border-radius: {{radius.md}}px;
+    border: none;
+}
+
+/* ============== TIMELINE ============== */
+QWidget#Timeline {
+    background: {{color.surface}};
+}
+
+QPushButton#PlayButton {
+    background: {{color.accent}};
+    border: none;
+    border-radius: 17px;
+    min-width: 34px;
+    max-width: 34px;
+    min-height: 34px;
+    max-height: 34px;
+    padding: 0;
+}
+QPushButton#PlayButton:hover {
+    background: {{color.accent_hover}};
+}
+QPushButton#PlayButton:checked {
+    background: {{color.accent_hover}};
 }
 
 /* ============== TOAST ============== */
@@ -279,17 +453,10 @@ QFrame#Toast {
     padding: {{space.md}}px {{space.lg}}px;
 }
 
-QFrame#Toast[severity="success"] {
-    border-color: {{color.success}};
-}
-
-QFrame#Toast[severity="warning"] {
-    border-color: {{color.warning}};
-}
-
-QFrame#Toast[severity="danger"] {
-    border-color: {{color.danger}};
-}
+QFrame#Toast[severity="success"] { border-left: 3px solid {{color.success}}; }
+QFrame#Toast[severity="warning"] { border-left: 3px solid {{color.warning}}; }
+QFrame#Toast[severity="danger"]  { border-left: 3px solid {{color.danger}};  }
+QFrame#Toast[severity="info"]    { border-left: 3px solid {{color.accent}};  }
 
 /* ============== COMMAND PALETTE ============== */
 QFrame#CommandPalette {
@@ -320,5 +487,5 @@ QFrame#CommandPalette QListView::item {
 
 QFrame#CommandPalette QListView::item:selected {
     background: {{color.accent}};
-    color: white;
+    color: {{color.on_accent}};
 }

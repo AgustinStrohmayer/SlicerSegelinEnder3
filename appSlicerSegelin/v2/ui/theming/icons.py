@@ -133,3 +133,15 @@ def get_icon(name: str, color: str = "#E6E8EE", size: int = 20) -> QIcon:
 
 def icon_names() -> list[str]:
     return sorted(_ICONS.keys())
+
+
+def set_icon(target, name: str, color: str, size: int = 20) -> None:
+    """Assign a themed icon and remember its name on the target.
+
+    Tagging ``_icon_name`` lets the window recolour every themeable
+    icon in one tree-walk when the theme changes, instead of rebuilding
+    the toolbar and sidebar. Works for both ``QAction`` and
+    ``QAbstractButton`` (both expose ``setProperty``/``setIcon``).
+    """
+    target.setProperty("_icon_name", name)
+    target.setIcon(get_icon(name, color, size))

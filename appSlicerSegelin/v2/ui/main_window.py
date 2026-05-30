@@ -21,7 +21,7 @@ from PyQt6.QtWidgets import (
 
 from ..core.geometry import Point
 from .controllers.project_controller import ProjectController
-from .theming.icons import get_icon
+from .theming.icons import get_icon, set_icon
 from .theming.qss import render_qss
 from .theming.tokens import ThemeName, get_tokens
 from .widgets.canvas.graphics_view import CanvasView
@@ -85,6 +85,7 @@ class MainWindow(QMainWindow):
 
         QShortcut(QKeySequence("Ctrl+K"), self).activated.connect(self.palette.open)
 
+        self._recolor_icons()
         self._refresh_canvas()
         self._refresh_info()
         self.toasts.show_toast("Welcome", "Load a DXF (Ctrl+O) — Ctrl+K for commands.", "info")
@@ -124,7 +125,8 @@ class MainWindow(QMainWindow):
         col = get_tokens(self.theme).color.text
 
         def act(name, label, slot, shortcut=None):
-            a = QAction(get_icon(name, col), label, self)
+            a = QAction(label, self)
+            set_icon(a, name, col)
             a.triggered.connect(slot)
             if shortcut:
                 a.setShortcut(shortcut)
@@ -379,9 +381,32 @@ class MainWindow(QMainWindow):
         self.scene.set_palette(
             ScenePalette(
                 background=t.bg, grid=t.border, axis=t.accent, cut=t.accent,
-                entry=t.success, exit=t.danger, travel=t.muted, union=t.warning, danger=t.danger,
+                entry=t.success, exit=t.danger, travel=t.muted, union=t.warning,
+                danger=t.danger, bed=t.border_strong,
             )
         )
+
+    def _recolor_icons(self) -> None:
+        """Re-tint every themeable icon for the active theme.
+
+        Toolbar actions and the sidebar's outline buttons are tagged
+        with ``_icon_name`` (see ``theming.icons.set_icon``); icons on
+        accent-filled buttons (primary actions, play) stay white and are
+        intentionally left untagged.
+        """
+        from PyQt6.QtWidgets import QAbstractButton
+
+        col = get_tokens(self.theme).color.text
+        # The toggle shows the icon for the theme you would switch *to*.
+        self._theme_action.setProperty("_icon_name", "moon" if self.theme == "light" else "sun")
+        for action in self._toolbar.actions():
+            name = action.property("_icon_name")
+            if name:
+                action.setIcon(get_icon(name, col))
+        for btn in self.findChildren(QAbstractButton):
+            name = btn.property("_icon_name")
+            if name:
+                btn.setIcon(get_icon(name, col))
 
     def _toggle_theme(self) -> None:
         self.theme = "light" if self.theme == "dark" else "dark"
@@ -392,5 +417,6 @@ class MainWindow(QMainWindow):
             app.setStyleSheet(render_qss(self.theme))
             app.setProperty("theme", self.theme)
         self._apply_scene_palette()
+        self._recolor_icons()
         self._refresh_canvas()
         self.statusBar().showMessage(f"Theme: {self.theme}", 2000)

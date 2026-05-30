@@ -21,12 +21,23 @@ from PyQt6.QtWidgets import (
 )
 
 from ...controllers.project_controller import ProjectController
-from ...theming.icons import get_icon
+from ...theming.icons import get_icon, set_icon
 from ..collapsible import CollapsibleSection
 
 
 def _primary(btn: QPushButton) -> QPushButton:
     btn.setProperty("role", "primary")
+    return btn
+
+
+def _icon_btn(name: str, label: str) -> QPushButton:
+    """Outline button whose icon recolours with the theme.
+
+    The colour passed here is a placeholder; ``MainWindow._recolor_icons``
+    re-tints every ``_icon_name``-tagged button on load and theme change.
+    """
+    btn = QPushButton(label)
+    set_icon(btn, name, "#969FB2")
     return btn
 
 
@@ -57,15 +68,17 @@ class Sidebar(QScrollArea):
     def __init__(self, controller: ProjectController, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.c = controller
+        self.setObjectName("Sidebar")
         self.setWidgetResizable(True)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.setFrameShape(QScrollArea.Shape.NoFrame)
 
         container = QWidget()
+        container.setObjectName("SidebarBody")
         self.setWidget(container)
         root = QVBoxLayout(container)
-        root.setContentsMargins(10, 10, 10, 10)
-        root.setSpacing(10)
+        root.setContentsMargins(14, 14, 14, 14)
+        root.setSpacing(12)
 
         root.addWidget(self._section_file())
         root.addWidget(self._section_shape())
@@ -105,22 +118,22 @@ class Sidebar(QScrollArea):
     # ── 2. Adjust shape ───────────────────────────────────────────────
     def _section_shape(self) -> CollapsibleSection:
         s = CollapsibleSection("2 · Adjust shape")
-        b_rot = QPushButton(get_icon("rotate-cw"), "  Rotate 90°")
+        b_rot = _icon_btn("rotate-cw", "  Rotate 90°")
         b_rot.clicked.connect(lambda: self.c.rotate(90))
         b_auto = QPushButton("Auto height")
         b_auto.clicked.connect(self.c.auto_height)
         s.add_layout(_row(b_rot, b_auto))
 
-        b_mv = QPushButton(get_icon("flip-horizontal"), "  Mirror V")
+        b_mv = _icon_btn("flip-horizontal", "  Mirror V")
         b_mv.clicked.connect(self.c.mirror_vertical)
-        b_mh = QPushButton(get_icon("flip-vertical"), "  Mirror H")
+        b_mh = _icon_btn("flip-vertical", "  Mirror H")
         b_mh.clicked.connect(self.c.mirror_horizontal)
         s.add_layout(_row(b_mv, b_mh))
 
         self.in_deg = _num_input("0.1", 60)
-        b_ccw = QPushButton(get_icon("rotate-ccw"), "")
+        b_ccw = _icon_btn("rotate-ccw", "")
         b_ccw.clicked.connect(lambda: self.c.rotate_fine(-self._deg()))
-        b_cw = QPushButton(get_icon("rotate-cw"), "")
+        b_cw = _icon_btn("rotate-cw", "")
         b_cw.clicked.connect(lambda: self.c.rotate_fine(self._deg()))
         s.add_layout(_row(QLabel("Fine °"), self.in_deg, b_ccw, b_cw))
 
