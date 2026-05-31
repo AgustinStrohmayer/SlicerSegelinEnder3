@@ -83,6 +83,19 @@ class SlicerScene(QGraphicsScene):
             self._draw_trajectory(model)
         if model.entry_point is not None:
             self._draw_entry(model.entry_point)
+        self._update_scene_rect(model)
+
+    def _update_scene_rect(self, model: SceneModel) -> None:
+        """Pad the scene around the content so the view can pan freely.
+
+        Without a generous scene rect, dragging stops as soon as the
+        content fits the viewport — there is nothing left to scroll.
+        """
+        content = self.itemsBoundingRect()
+        if content.isEmpty():
+            content = QRectF(0, 0, model.bed_y, model.bed_z)
+        pad = max(content.width(), content.height(), model.bed_y, model.bed_z, 50.0)
+        self.setSceneRect(content.adjusted(-pad, -pad, pad, pad))
 
     # ── pieces ────────────────────────────────────────────────────────
     def _draw_bed(self, model: SceneModel) -> None:

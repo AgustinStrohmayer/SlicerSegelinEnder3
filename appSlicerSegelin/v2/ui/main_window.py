@@ -59,8 +59,6 @@ class MainWindow(QMainWindow):
         self.view = self.canvas.view
         self.scene = self.canvas.scene
         self.view.clicked.connect(self._on_canvas_click)
-        self.view.cursorMoved.connect(self._on_cursor_moved)
-        self.view.transformChanged.connect(self._on_transform_changed)
         self.setCentralWidget(self.canvas)
         self._apply_scene_palette()
 
@@ -98,6 +96,10 @@ class MainWindow(QMainWindow):
         self.controller.layers_changed.connect(self._refresh_canvas)
         self.controller.notify.connect(self._on_notify)
 
+        # Canvas readouts — connected now that the status bar exists.
+        self.view.cursorMoved.connect(self._on_cursor_moved)
+        self.view.transformChanged.connect(self._on_transform_changed)
+
         QShortcut(QKeySequence("Ctrl+K"), self).activated.connect(self.palette.open)
         QShortcut(QKeySequence("?"), self).activated.connect(self._open_shortcuts_overlay)
         QShortcut(QKeySequence("Shift+/"), self).activated.connect(self._open_shortcuts_overlay)
@@ -105,6 +107,8 @@ class MainWindow(QMainWindow):
         self._recolor_icons()
         self._refresh_canvas()
         self._refresh_info()
+        # Frame the work area once the window has a real size.
+        QTimer.singleShot(0, self.view.fit_to_content)
         self.toasts.show_toast("Welcome", "Load a DXF (Ctrl+O) — Ctrl+K for commands.", "info")
 
     # ── docks ─────────────────────────────────────────────────────────

@@ -1,16 +1,20 @@
 """Pannable, zoomable QGraphicsView.
 
-Emits ``cursorMoved(y, z)`` whenever the mouse hovers a position and
-``transformChanged()`` whenever zoom or scroll change — both feed the
-rulers, coord readout and zoom badge.
+Navigation is mouse-first: the wheel zooms toward the cursor, dragging
+with the left or middle button pans, and Shift+wheel scrolls sideways.
+A left press that doesn't drag is reported as ``clicked`` for picking
+(entry point, diagonal cuts). Emits ``cursorMoved(y, z)`` on hover and
+``transformChanged()`` on any zoom/scroll — both feed the rulers,
+coord readout and zoom badge.
 """
 from __future__ import annotations
 
-from PyQt6.QtCore import QPointF, Qt, pyqtSignal
+from PyQt6.QtCore import QPoint, QPointF, Qt, pyqtSignal
 from PyQt6.QtGui import QKeyEvent, QMouseEvent, QPainter, QResizeEvent, QWheelEvent
 from PyQt6.QtWidgets import QGraphicsView
 
 _ZOOM_FACTOR = 1.15
+_CLICK_SLOP = 5  # px of travel still treated as a click, not a pan
 
 
 class CanvasView(QGraphicsView):
@@ -25,7 +29,7 @@ class CanvasView(QGraphicsView):
             | QPainter.RenderHint.SmoothPixmapTransform
             | QPainter.RenderHint.TextAntialiasing
         )
-        self.setDragMode(QGraphicsView.DragMode.RubberBandDrag)
+        self.setDragMode(QGraphicsView.DragMode.NoDrag)
         self.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
         self.setResizeAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
@@ -34,74 +38,67 @@ class CanvasView(QGraphicsView):
         self.setFrameShape(QGraphicsView.Shape.NoFrame)
         # Mathematical Y axis (up), as in the legacy app.
         self.scale(1.0, -1.0)
-        self._panning = False
-        self._space_held = False
+        self._pan_active = False
+        self._pan_last = QPoint()
+        self._press_pos = QPoint()
+        self._maybe_click = False
 
     # ── input ────────────────────────────────────────────────────────
     def wheelEvent(self, event: QWheelEvent) -> None:
-        if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
-            factor = _ZOOM_FACTOR if event.angleDelta().y() > 0 else 1 / _ZOOM_FACTOR
-            self.scale(factor, factor)
+        delta = event.angleDelta().y()
+        if event.modifiers() & Qt.KeyboardModifier.ShiftModifier:
+            bar = self.horizontalScrollBar()
+            bar.setValue(bar.value() - delta)
             self.transformChanged.emit()
             event.accept()
             return
-        super().wheelEvent(event)
+        # Plain (or Ctrl) wheel zooms toward the cursor.
+        factor = _ZOOM_FACTOR if delta > 0 else 1 / _ZOOM_FACTOR
+        self.scale(factor, factor)
         self.transformChanged.emit()
+        event.accept()
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
-        if event.key() == Qt.Key.Key_Space and not event.isAutoRepeat():
-            self._space_held = True
-            self.setDragMode(QGraphicsView.DragMode.ScrollHandDrag)
-            event.accept()
-            return
         if event.key() == Qt.Key.Key_F and not event.modifiers():
             self.fit_to_content()
             event.accept()
             return
         super().keyPressEvent(event)
 
-    def keyReleaseEvent(self, event: QKeyEvent) -> None:
-        if event.key() == Qt.Key.Key_Space and not event.isAutoRepeat():
-            self._space_held = False
-            self.setDragMode(QGraphicsView.DragMode.RubberBandDrag)
-            event.accept()
-            return
-        super().keyReleaseEvent(event)
-
     def mousePressEvent(self, event: QMouseEvent) -> None:
-        if event.button() == Qt.MouseButton.MiddleButton:
-            self._panning = True
-            self.setDragMode(QGraphicsView.DragMode.ScrollHandDrag)
-            fake = QMouseEvent(
-                event.type(),
-                event.position(),
-                Qt.MouseButton.LeftButton,
-                Qt.MouseButton.LeftButton,
-                event.modifiers(),
-            )
-            super().mousePressEvent(fake)
+        if event.button() in (Qt.MouseButton.LeftButton, Qt.MouseButton.MiddleButton):
+            self._pan_active = True
+            self._pan_last = event.position().toPoint()
+            self._press_pos = self._pan_last
+            self._maybe_click = event.button() == Qt.MouseButton.LeftButton
+            self.viewport().setCursor(Qt.CursorShape.ClosedHandCursor)
             event.accept()
             return
-        if (
-            event.button() == Qt.MouseButton.LeftButton
-            and not self._space_held
-            and self.dragMode() != QGraphicsView.DragMode.ScrollHandDrag
-        ):
-            pt = self.mapToScene(event.position().toPoint())
-            self.clicked.emit(pt.x(), pt.y())
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:
-        pt = self.mapToScene(event.position().toPoint())
-        self.cursorMoved.emit(pt.x(), pt.y())
+        pos = event.position().toPoint()
+        if self._pan_active:
+            delta = pos - self._pan_last
+            self._pan_last = pos
+            h = self.horizontalScrollBar()
+            v = self.verticalScrollBar()
+            h.setValue(h.value() - delta.x())
+            v.setValue(v.value() - delta.y())
+            if (pos - self._press_pos).manhattanLength() > _CLICK_SLOP:
+                self._maybe_click = False
+        scene_pt = self.mapToScene(pos)
+        self.cursorMoved.emit(scene_pt.x(), scene_pt.y())
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
-        if event.button() == Qt.MouseButton.MiddleButton and self._panning:
-            self._panning = False
-            self.setDragMode(
-                QGraphicsView.DragMode.ScrollHandDrag if self._space_held else QGraphicsView.DragMode.RubberBandDrag
-            )
+        if self._pan_active and event.button() in (Qt.MouseButton.LeftButton, Qt.MouseButton.MiddleButton):
+            self._pan_active = False
+            self.viewport().unsetCursor()
+            if self._maybe_click and event.button() == Qt.MouseButton.LeftButton:
+                pt = self.mapToScene(event.position().toPoint())
+                self.clicked.emit(pt.x(), pt.y())
+            self._maybe_click = False
             event.accept()
             return
         super().mouseReleaseEvent(event)
