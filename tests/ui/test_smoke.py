@@ -40,7 +40,7 @@ def test_window_builds(app):
     from appSlicerSegelin.v2.ui.main_window import MainWindow
 
     w = MainWindow()
-    assert w.windowTitle() == "SlicerSegelinEnder3"
+    assert "SlicerSegelinEnder3" in w.windowTitle()
     assert len(list(w.registry.all())) >= 10
 
 

@@ -418,31 +418,96 @@ QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {
 }
 
 /* ============== CANVAS ============== */
+QWidget#CanvasContainer {
+    background: {{color.bg}};
+}
+
 QGraphicsView {
     background: {{color.bg}};
     border: none;
 }
 
+/* Rulers + the corner square between them. */
+QWidget#Ruler {
+    background: {{color.surface}};
+    border-right: 1px solid {{color.border}};
+    border-bottom: 1px solid {{color.border}};
+}
+
+/* Floating canvas controls (zoom in/out, fit, reset). */
+QFrame#FloatingControls {
+    background: {{color.surface}};
+    border: 1px solid {{color.border}};
+    border-radius: {{radius.md}}px;
+}
+
+QToolButton#CanvasFloatBtn {
+    background: transparent;
+    border: none;
+    border-radius: {{radius.sm}}px;
+    padding: 5px;
+    color: {{color.text}};
+}
+QToolButton#CanvasFloatBtn:hover {
+    background: {{color.elevated}};
+    color: {{color.accent}};
+}
+
+QLabel#CoordReadout {
+    background: {{color.surface}};
+    border: 1px solid {{color.border}};
+    border-radius: {{radius.sm}}px;
+    padding: 4px 10px;
+    color: {{color.muted}};
+    font-family: {{typography.family_mono}};
+    font-size: {{typography.size_small}}px;
+}
+
+QLabel#ZoomBadge {
+    background: {{color.surface}};
+    border: 1px solid {{color.border}};
+    border-radius: {{radius.sm}}px;
+    padding: 4px 10px;
+    color: {{color.muted}};
+    font-family: {{typography.family_mono}};
+    font-size: {{typography.size_small}}px;
+}
+QLabel#ZoomBadge:hover {
+    color: {{color.accent}};
+    border-color: {{color.accent}};
+}
+
+/* Status-bar permanent readouts. */
+QStatusBar QLabel {
+    color: {{color.muted}};
+    padding: 0 {{space.sm}}px;
+}
+QStatusBar QLabel[role="mono"] {
+    font-family: {{typography.family_mono}};
+    color: {{color.text}};
+}
+
 /* ============== TIMELINE ============== */
 QWidget#Timeline {
     background: {{color.surface}};
+    border-top: 1px solid {{color.border}};
 }
 
-QPushButton#PlayButton {
-    background: {{color.accent}};
-    border: none;
-    border-radius: 17px;
-    min-width: 34px;
-    max-width: 34px;
-    min-height: 34px;
-    max-height: 34px;
-    padding: 0;
+/* Loop toggle (QToolButton) in the transport row. */
+QWidget#Timeline QToolButton {
+    background: {{color.elevated}};
+    border: 1px solid {{color.border_strong}};
+    border-radius: {{radius.sm}}px;
+    color: {{color.text}};
 }
-QPushButton#PlayButton:hover {
-    background: {{color.accent_hover}};
+QWidget#Timeline QToolButton:hover {
+    border-color: {{color.accent}};
+    color: {{color.accent}};
 }
-QPushButton#PlayButton:checked {
-    background: {{color.accent_hover}};
+QWidget#Timeline QToolButton:checked {
+    background: {{color.accent_soft}};
+    border-color: {{color.accent}};
+    color: {{color.accent}};
 }
 
 /* ============== TOAST ============== */
@@ -488,4 +553,48 @@ QFrame#CommandPalette QListView::item {
 QFrame#CommandPalette QListView::item:selected {
     background: {{color.accent}};
     color: {{color.on_accent}};
+}
+
+/* ============== SHORTCUTS OVERLAY ============== */
+QWidget#OverlayBackdrop {
+    background: rgba(0, 0, 0, 0.45);
+}
+
+QFrame#ShortcutsOverlay {
+    background: {{color.surface}};
+    border: 1px solid {{color.border}};
+    border-radius: {{radius.lg}}px;
+}
+
+QFrame#ShortcutsOverlay QScrollArea,
+QFrame#ShortcutsOverlay QScrollArea > QWidget > QWidget {
+    background: transparent;
+    border: none;
+}
+
+QLabel[role="title"] {
+    font-size: {{typography.size_title}}px;
+    font-weight: 700;
+    color: {{color.text}};
+}
+
+QLabel[role="body"] {
+    color: {{color.text}};
+}
+
+QLabel[role="kbd"] {
+    background: {{color.surface_alt}};
+    border: 1px solid {{color.border_strong}};
+    border-radius: {{radius.sm}}px;
+    padding: 2px 8px;
+    color: {{color.muted}};
+    font-family: {{typography.family_mono}};
+    font-size: {{typography.size_small}}px;
+}
+
+QLabel#FieldLabel {
+    color: {{color.muted}};
+    font-size: {{typography.size_small}}px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
 }

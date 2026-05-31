@@ -58,6 +58,10 @@ class Project:
     # Export.
     batch_basename: str = "cut"
 
+    # Origin file traceability — set on DXF import, kept so .ssproj archives
+    # can record where the geometry came from.
+    source_dxf_name: str | None = None
+
     view: ViewState = field(default_factory=ViewState)
     bus: EventBus = field(default_factory=EventBus)
     schema_version: int = SCHEMA_VERSION

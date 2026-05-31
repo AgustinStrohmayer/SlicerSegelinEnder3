@@ -38,6 +38,8 @@ class ProjectController(QObject):
         self.layers: list[Layer] = []
         self.focused_layer: int = -1  # -1 = full view
         self.pending_diagonal: Point | None = None
+        # Bytes of the original DXF, kept around so .ssproj saves embed it.
+        self._source_dxf_bytes: bytes | None = None
 
     # ── helpers ───────────────────────────────────────────────────────
     @property
@@ -68,10 +70,18 @@ class ProjectController(QObject):
 
     # ── import ────────────────────────────────────────────────────────
     def import_dxf(self, path: str, use_units: bool = True, scale: float = 1.0) -> None:
+        from pathlib import Path
+
         from ...io.dxf_reader import DxfReadOptions, read_dxf
 
         try:
             segments = read_dxf(path, DxfReadOptions(apply_units=use_units, scale=scale))
+            # Cache the original bytes so they can be embedded in the
+            # next .ssproj save (lets a project travel between machines).
+            try:
+                self._source_dxf_bytes = Path(path).read_bytes()
+            except OSError:
+                self._source_dxf_bytes = None
         except SlicerError as exc:
             self.notify.emit("DXF import failed", str(exc), "danger")
             return
@@ -79,21 +89,29 @@ class ProjectController(QObject):
             self.notify.emit("Empty DXF", "No supported geometry found.", "warning")
             return
 
-        prev = (list(self.project.segments), self.project.offset_y, self.project.offset_z)
+        prev = (
+            list(self.project.segments),
+            self.project.offset_y,
+            self.project.offset_z,
+            self.project.source_dxf_name,
+        )
+        new_name = Path(path).name
 
         def do() -> None:
             self.project.segments = list(segments)
+            self.project.source_dxf_name = new_name
             self.project.center_on_bed()
             self._invalidate_layers()
             self.changed.emit()
             self.info_changed.emit()
 
         def undo() -> None:
-            self.project.segments, self.project.offset_y, self.project.offset_z = (
-                list(prev[0]),
-                prev[1],
-                prev[2],
-            )
+            (
+                self.project.segments,
+                self.project.offset_y,
+                self.project.offset_z,
+                self.project.source_dxf_name,
+            ) = list(prev[0]), prev[1], prev[2], prev[3]
             self.changed.emit()
             self.info_changed.emit()
 
@@ -320,6 +338,44 @@ class ProjectController(QObject):
         if self.history.redo() is None:
             return False
         self._invalidate_layers()
+        return True
+
+    # ── project archive (.ssproj) ────────────────────────────────────
+    def save_project_archive(self, path: str, scene=None) -> bool:  # type: ignore[no-untyped-def]
+        """Bundle project + source DXF + optional thumbnail into one ZIP."""
+        from ...io import project_archive
+
+        thumb = project_archive.render_thumbnail_png(scene) if scene is not None else None
+        try:
+            out = project_archive.save_archive(
+                path,
+                self.project,
+                source_dxf_bytes=self._source_dxf_bytes,
+                thumbnail_png=thumb,
+                title=self.project.source_dxf_name or "Untitled",
+            )
+        except SlicerError as exc:
+            self.notify.emit("Save failed", str(exc), "danger")
+            return False
+        self.notify.emit("Project saved", str(out), "success")
+        return True
+
+    def open_project_archive(self, path: str) -> bool:
+        from ...io import project_archive
+
+        try:
+            content = project_archive.load_archive(path)
+        except SlicerError as exc:
+            self.notify.emit("Open failed", str(exc), "danger")
+            return False
+        self.project = content.project
+        self._source_dxf_bytes = content.source_dxf_bytes
+        self.history.clear()
+        self._invalidate_layers()
+        self.changed.emit()
+        self.info_changed.emit()
+        title = content.manifest.get("title") or self.project.source_dxf_name or "Untitled"
+        self.notify.emit("Project loaded", title, "success")
         return True
 
     # ── export ────────────────────────────────────────────────────────
