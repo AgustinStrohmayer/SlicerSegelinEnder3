@@ -353,6 +353,20 @@ class MainWindow(QMainWindow):
             self.controller.import_dxf(path, use_units, scale)
             self._remember(path)
             self.view.fit_to_content()
+            self._show_canvas_hint()
+
+    def _show_canvas_hint(self) -> None:
+        """One-time discoverability nudge for the canvas interactions."""
+        if getattr(self, "_canvas_hint_shown", False):
+            return
+        self._canvas_hint_shown = True
+        self.toasts.show_toast(
+            "Tip — drag to edit on the canvas",
+            "Drag the part to position it · drag a cut to move it · "
+            "drag empty space to pan · wheel to zoom · M to measure",
+            "info",
+            duration_ms=8000,
+        )
 
     def _remember(self, path: str) -> None:
         """Add a path to the recents list and refresh the window chrome."""
@@ -429,6 +443,7 @@ class MainWindow(QMainWindow):
             return
         self._remember(path)
         self.view.fit_to_content()
+        self._show_canvas_hint()
 
     def _on_new_project(self) -> None:
         from ..core.project import Project
