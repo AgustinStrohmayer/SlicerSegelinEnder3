@@ -439,7 +439,7 @@ class MainWindow(QMainWindow):
         """Open any supported file by extension: .dxf, .ssproj or legacy .ssp."""
         ext = Path(path).suffix.lower()
         if ext == ".dxf":
-            self.controller.import_dxf(path)
+            self.controller.import_dxf(path, self.sidebar.chk_units.isChecked(), 1.0)
         elif ext == ".ssproj":
             if not self.controller.open_project_archive(path):
                 return
@@ -502,8 +502,14 @@ class MainWindow(QMainWindow):
         self.view_mode = mode
         self.parts_grid.setVisible(mode in ("grid", "split"))
         self.canvas.setVisible(mode in ("single", "split"))
-        if mode == "split":
-            self._center_split.setSizes([520, 980])
+        # Explicitly size both panes for every mode, otherwise a hidden pane
+        # keeps reserving its old slot (e.g. the grid stuck in one column).
+        if mode == "grid":
+            self._center_split.setSizes([1500, 0])
+        elif mode == "single":
+            self._center_split.setSizes([0, 1500])
+        else:  # split
+            self._center_split.setSizes([560, 940])
         # Re-frame once the new layout has settled (canvas width changed).
         if self.canvas.isVisible():
             QTimer.singleShot(0, self.view.fit_to_content)

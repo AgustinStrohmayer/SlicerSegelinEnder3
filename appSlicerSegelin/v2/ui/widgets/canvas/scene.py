@@ -183,6 +183,27 @@ class SlicerScene(QGraphicsScene):
         self.addEllipse(QRectF(hx - r, hz - r, 2 * r, 2 * r), pen, QBrush(col)).setZValue(13)
         self.handle_points["rotate"] = (hx, hz)
 
+    def content_rect(self) -> QRectF | None:
+        """Bbox of the *meaningful* content (part + bed) for fit-to-content.
+
+        Deliberately excludes the manual-cut/guide lines (which extend many
+        times the bed size) and the padded scene rect, so framing stays on
+        the actual geometry instead of zooming way out.
+        """
+        m = self._model
+        ys: list[float] = []
+        zs: list[float] = []
+        for s in m.segments:
+            ys.extend([s.a.y, s.b.y])
+            zs.extend([s.a.z, s.b.z])
+        if m.show_bed:
+            ys.extend([0.0, m.bed_y])
+            zs.extend([0.0, m.bed_z])
+        if not ys:
+            return None
+        y0, y1, z0, z1 = min(ys), max(ys), min(zs), max(zs)
+        return QRectF(y0, z0, max(1e-6, y1 - y0), max(1e-6, z1 - z0))
+
     def _update_scene_rect(self, model: SceneModel) -> None:
         """Pad the scene around the content so the view can pan freely.
 

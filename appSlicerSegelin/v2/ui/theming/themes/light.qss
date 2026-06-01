@@ -314,7 +314,7 @@ QCheckBox::indicator {
     width: 16px;
     height: 16px;
     border-radius: {{radius.sm}}px;
-    border: 1px solid {{color.border_strong}};
+    border: 1px solid {{color.muted}};
     background: {{color.bg}};
 }
 
@@ -545,10 +545,13 @@ QWidget#Timeline QToolButton:checked {
 }
 
 /* ============== TOAST ============== */
+/* A solid card on its own surface with a strong border so it clearly reads
+ * as a floating notification over the canvas (not see-through). */
 QFrame#Toast {
-    background: {{color.surface_alt}};
-    border: 1px solid {{color.border}};
-    border-radius: {{radius.lg}}px;
+    background: {{color.surface}};
+    border: 1px solid {{color.border_strong}};
+    border-left: 3px solid {{color.accent}};
+    border-radius: {{radius.md}}px;
     padding: {{space.md}}px {{space.lg}}px;
 }
 
@@ -556,6 +559,7 @@ QFrame#Toast[severity="success"] { border-left: 3px solid {{color.success}}; }
 QFrame#Toast[severity="warning"] { border-left: 3px solid {{color.warning}}; }
 QFrame#Toast[severity="danger"]  { border-left: 3px solid {{color.danger}};  }
 QFrame#Toast[severity="info"]    { border-left: 3px solid {{color.accent}};  }
+QFrame#Toast QLabel { background: transparent; }
 
 /* ============== COMMAND PALETTE ============== */
 QFrame#CommandPalette {

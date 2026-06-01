@@ -189,10 +189,17 @@ class CanvasView(QGraphicsView):
         scene = self.scene()
         if scene is None:
             return
-        rect = scene.itemsBoundingRect()
+        # Prefer the part+bed content rect (ignores the long cut/guide lines
+        # and the padded scene rect) so framing lands on the geometry.
+        rect = None
+        getter = getattr(scene, "content_rect", None)
+        if getter is not None:
+            rect = getter()
+        if rect is None or rect.isEmpty():
+            rect = scene.itemsBoundingRect()
         if rect.isEmpty():
             return
-        margin = 0.05 * max(rect.width(), rect.height())
+        margin = 0.06 * max(rect.width(), rect.height())
         rect.adjust(-margin, -margin, margin, margin)
         self.fitInView(rect, Qt.AspectRatioMode.KeepAspectRatio)
         self.transformChanged.emit()

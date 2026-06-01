@@ -20,11 +20,16 @@ class ToastHost(QWidget):
 
     def __init__(self, parent: QWidget) -> None:
         super().__init__(parent)
-        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, False)
+        self.setObjectName("ToastHost")
+        # Pass mouse events through the (invisible) host to the canvas below;
+        # the individual toast cards stay clickable as opaque children.
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         self._layout = QVBoxLayout(self)
         self._layout.setSpacing(8)
         self._layout.setContentsMargins(0, 0, 0, 0)
-        self.setStyleSheet("background: transparent;")
+        # Scope the transparency to the host only — an unscoped "background:
+        # transparent" cascades to the toast cards and makes them see-through.
+        self.setStyleSheet("QWidget#ToastHost { background: transparent; }")
         self.raise_()
         if parent is not None:
             parent.installEventFilter(self)
@@ -77,13 +82,12 @@ class _Toast(QFrame):
         text_col = QVBoxLayout()
         text_col.setSpacing(2)
         t = QLabel(title)
-        t.setStyleSheet("font-weight: 600;")
+        t.setProperty("role", "title")
         text_col.addWidget(t)
         if body:
             b = QLabel(body)
             b.setWordWrap(True)
             b.setProperty("class", "muted")
-            b.setStyleSheet("color: #8A93A6;")
             text_col.addWidget(b)
         outer.addLayout(text_col, 1)
 
