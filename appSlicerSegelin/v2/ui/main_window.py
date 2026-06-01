@@ -16,6 +16,7 @@ from PyQt6.QtWidgets import (
     QFileDialog,
     QMainWindow,
     QSizePolicy,
+    QStackedWidget,
     QToolBar,
     QToolButton,
     QWidget,
@@ -83,9 +84,15 @@ class MainWindow(QMainWindow):
         self.parts_grid.part_enabled_toggled.connect(self.controller.set_part_enabled)
         from PyQt6.QtWidgets import QSplitter
 
+        # The right pane can show the 2D canvas or the 3D slicer view (lazy).
+        self._canvas_stack = QStackedWidget(self)
+        self._canvas_stack.addWidget(self.canvas)
+        self._viewer3d = None
+        self._view3d = False
+
         self._center_split = QSplitter(Qt.Orientation.Horizontal, self)
         self._center_split.addWidget(self.parts_grid)
-        self._center_split.addWidget(self.canvas)
+        self._center_split.addWidget(self._canvas_stack)
         self._center_split.setStretchFactor(0, 1)
         self._center_split.setStretchFactor(1, 1)
         self._center_split.setSizes([520, 980])
@@ -137,6 +144,7 @@ class MainWindow(QMainWindow):
         self.controller.parts_changed.connect(self.parts_grid.refresh)
         self.controller.parts_changed.connect(self._update_part_panel)
         self.controller.changed.connect(self.parts_grid.refresh)
+        self.controller.changed.connect(self._on_changed_viewer3d)
         self.controller.notify.connect(self._on_notify)
 
         # Canvas readouts — connected now that the status bar exists.
@@ -244,6 +252,13 @@ class MainWindow(QMainWindow):
         self._dims_action.setToolTip("Show the part's width × height on the canvas")
         self._dims_action.toggled.connect(self._toggle_dims)
         bar.addAction(self._dims_action)
+
+        self._view3d_action = QAction("3D", self)
+        set_icon(self._view3d_action, "cube", col)
+        self._view3d_action.setCheckable(True)
+        self._view3d_action.setToolTip("3D slicer view — printer, foam block & hot wire")
+        self._view3d_action.toggled.connect(self._toggle_3d)
+        bar.addAction(self._view3d_action)
 
         act("layers", "Cycle view: single / split / grid", self._cycle_view)
         act("command", "Command palette (Ctrl+K)", self.palette.open)
@@ -360,6 +375,7 @@ class MainWindow(QMainWindow):
         r.register(CommandEntry("view.shortcuts", "View: Keyboard shortcuts", self._open_shortcuts_overlay, "?"))
         r.register(CommandEntry("view.measure", "View: Measure tool", self._measure_action.trigger, "M"))
         r.register(CommandEntry("view.dims", "View: Toggle part dimensions", self._dims_action.trigger))
+        r.register(CommandEntry("view.3d", "View: Toggle 3D slicer view", self._view3d_action.trigger))
         r.register(CommandEntry("preview.gen", "Preview: Generate plates/parts", self.controller.generate_preview))
 
     # ── file dialogs / actions ────────────────────────────────────────
@@ -491,17 +507,25 @@ class MainWindow(QMainWindow):
             self._set_view_mode("single")
         self._update_part_panel()
 
+    def _2d_visible(self) -> bool:
+        """True when the 2D canvas (not the 3D view) is the shown right pane."""
+        return self._canvas_stack.isVisible() and self._canvas_stack.currentWidget() is self.canvas
+
+    def _viewer_visible(self) -> bool:
+        return (self._viewer3d is not None and self._canvas_stack.isVisible()
+                and self._canvas_stack.currentWidget() is self._viewer3d)
+
     def _on_part_selected(self, index: int) -> None:
         self.controller.focus_layer(index)
         self.parts_grid.set_selected(index)
         self._update_part_panel()
-        if self.canvas.isVisible():
+        if self._2d_visible():
             QTimer.singleShot(0, self.view.fit_to_content)
 
     def _set_view_mode(self, mode: str) -> None:
         self.view_mode = mode
         self.parts_grid.setVisible(mode in ("grid", "split"))
-        self.canvas.setVisible(mode in ("single", "split"))
+        self._canvas_stack.setVisible(mode in ("single", "split"))
         # Explicitly size both panes for every mode, otherwise a hidden pane
         # keeps reserving its old slot (e.g. the grid stuck in one column).
         if mode == "grid":
@@ -511,9 +535,48 @@ class MainWindow(QMainWindow):
         else:  # split
             self._center_split.setSizes([560, 940])
         # Re-frame once the new layout has settled (canvas width changed).
-        if self.canvas.isVisible():
+        if self._2d_visible():
             QTimer.singleShot(0, self.view.fit_to_content)
         self.statusBar().showMessage(f"View: {mode}", 1500)
+
+    # ── 3D slicer view ────────────────────────────────────────────────
+    def _toggle_3d(self, on: bool) -> None:
+        self._view3d = on
+        if on:
+            if self._viewer3d is None:
+                try:
+                    from .widgets.canvas.viewer3d import Viewer3D
+
+                    self._viewer3d = Viewer3D(self)
+                    self._viewer3d.set_palette(self.theme)
+                    self._canvas_stack.addWidget(self._viewer3d)
+                except Exception as exc:  # OpenGL/pyqtgraph unavailable on this machine
+                    self._view3d = False
+                    self._view3d_action.blockSignals(True)
+                    self._view3d_action.setChecked(False)
+                    self._view3d_action.blockSignals(False)
+                    self.toasts.show_toast("3D view unavailable", str(exc), "warning")
+                    return
+            self._canvas_stack.setCurrentWidget(self._viewer3d)
+            self._refresh_viewer3d(full=True)
+            if self.view_mode == "grid":
+                self._set_view_mode("split")  # need the right pane visible to see 3D
+        else:
+            self._canvas_stack.setCurrentWidget(self.canvas)
+            QTimer.singleShot(0, self.view.fit_to_content)
+        self.statusBar().showMessage("View: 3D" if on else "View: 2D", 1500)
+
+    def _refresh_viewer3d(self, full: bool = False) -> None:
+        if self._viewer3d is None:
+            return
+        c = self.controller
+        if full:
+            self._viewer3d.set_model(c.project.machine_segments(), c.project.area_y_mm, c.project.area_z_mm)
+        self._viewer3d.set_cut(c.active_trajectory(), self.timeline.progress_fraction())
+
+    def _on_changed_viewer3d(self) -> None:
+        if self._viewer_visible():
+            self._refresh_viewer3d(full=True)
 
     def _cycle_view(self) -> None:
         order = ["single", "split", "grid"]
@@ -920,6 +983,8 @@ class MainWindow(QMainWindow):
         self.timeline.set_progress_fraction(fraction)
         self._refresh_canvas()
         self._refresh_info()
+        if self._viewer_visible():
+            self._refresh_viewer3d(full=False)
 
     def _on_scrub(self) -> None:
         if self._sim_timer.isActive():
@@ -927,6 +992,8 @@ class MainWindow(QMainWindow):
             self.timeline.set_play_state(False)
         self._refresh_canvas()
         self._refresh_info()
+        if self._viewer_visible():
+            self._refresh_viewer3d(full=False)
 
     # ── refresh ───────────────────────────────────────────────────────
     def _current_view_geometry(self):
@@ -1037,4 +1104,7 @@ class MainWindow(QMainWindow):
         self._apply_scene_palette()
         self._recolor_icons()
         self._refresh_canvas()
+        if self._viewer3d is not None:
+            self._viewer3d.set_palette(self.theme)
+            self._refresh_viewer3d(full=True)
         self.statusBar().showMessage(f"Theme: {self.theme}", 2000)
