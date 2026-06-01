@@ -60,6 +60,11 @@ class MainWindow(QMainWindow):
         self.view = self.canvas.view
         self.scene = self.canvas.scene
         self.view.clicked.connect(self._on_canvas_click)
+        # Direct manipulation: drag the part / cuts on the canvas.
+        self.view.hit_test = self._canvas_hit_test
+        self.view.on_object_drag = self._on_object_drag
+        self.view.on_object_drag_end = self._on_object_drag_end
+        self._dragging_obj = False
 
         # Parts gallery sits beside the canvas in a splitter; toggling each
         # side's visibility gives the single / grid / split view modes.
@@ -583,6 +588,61 @@ class MainWindow(QMainWindow):
     def _toggle_dims(self, on: bool) -> None:
         self._show_dims = on
         self._refresh_canvas()
+
+    # ── direct manipulation (drag part / cuts) ────────────────────────
+    def _scene_tolerance(self, px: float = 9.0) -> float:
+        """``px`` screen pixels expressed in scene (mm) units at the current zoom."""
+        scale = abs(self.view.transform().m11()) or 1.0
+        return px / scale
+
+    def _canvas_hit_test(self, scene_pt):
+        """Return ('cut', i) | ('part', None) | None for the point under the cursor."""
+        c = self.controller
+        if self._measure_mode or self._picking_diagonal or not c.has_geometry:
+            return None
+        if c.focused_layer != -1:  # only manipulate in the full view
+            return None
+        import math
+
+        tol = self._scene_tolerance()
+        # Cuts are thin targets → test them first.
+        if c.project.use_manual_cuts:
+            for i, cut in enumerate(c.project.manual_cuts):
+                a, b, cc = cut.to_machine_line(c.project.offset_y, c.project.offset_z)
+                denom = math.hypot(a, b) or 1.0
+                if abs(a * scene_pt.x() + b * scene_pt.y() + cc) / denom <= tol:
+                    return ("cut", i)
+        # Inside the part's bounding box → grab the whole part.
+        segs = c.project.machine_segments()
+        if segs:
+            ys = [p for s in segs for p in (s.a.y, s.b.y)]
+            zs = [p for s in segs for p in (s.a.z, s.b.z)]
+            if (min(ys) - tol <= scene_pt.x() <= max(ys) + tol
+                    and min(zs) - tol <= scene_pt.y() <= max(zs) + tol):
+                return ("part", None)
+        return None
+
+    def _on_object_drag(self, handle, dy: float, dz: float) -> None:
+        kind, idx = handle
+        if kind == "part":
+            if not self._dragging_obj:
+                self.controller.begin_part_move()
+                self._dragging_obj = True
+            c = self.controller
+            self.controller.move_part_to(c.project.offset_y + dy, c.project.offset_z + dz)
+        elif kind == "cut":
+            if not self._dragging_obj:
+                self.controller.begin_cut_move(idx)
+                self._dragging_obj = True
+            self.controller.move_cut(idx, dy, dz)
+
+    def _on_object_drag_end(self, handle) -> None:
+        kind, idx = handle
+        if kind == "part":
+            self.controller.end_part_move()
+        elif kind == "cut":
+            self.controller.end_cut_move(idx)
+        self._dragging_obj = False
 
     def _on_canvas_escape(self) -> None:
         if self._measure_a is not None or self._measure_b is not None:

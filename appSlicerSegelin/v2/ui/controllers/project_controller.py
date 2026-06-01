@@ -14,7 +14,7 @@ from ...core import transforms
 from ...core.commands import CommandStack, FunctionCommand
 from ...core.errors import SlicerError
 from ...core.geometry import BBox, Point, Segment
-from ...core.manual_cuts import make_two_point_cut, make_y_cut, make_z_cut
+from ...core.manual_cuts import CutKind, make_two_point_cut, make_y_cut, make_z_cut
 from ...core.part_settings import PartSettings
 from ...core.plates import Layer
 from ...core.project import Project
@@ -218,6 +218,85 @@ class ProjectController(QObject):
         if best_angle:
             self.rotate(best_angle)
         self.notify.emit("Auto height", f"Rotated {best_angle}° (min height {min_height:.1f} mm)", "info")
+
+    # ── direct manipulation (drag part / cuts on the canvas) ──────────
+    def begin_part_move(self) -> None:
+        self._part_move_start = (self.project.offset_y, self.project.offset_z)
+
+    def move_part_to(self, offset_y: float, offset_z: float) -> None:
+        """Live offset update while dragging — no history entry."""
+        self.project.set_offset(offset_y, offset_z)
+        self.changed.emit()
+        self.info_changed.emit()
+
+    def end_part_move(self) -> None:
+        start = getattr(self, "_part_move_start", None)
+        self._part_move_start = None
+        if start is None:
+            return
+        end = (self.project.offset_y, self.project.offset_z)
+        if abs(end[0] - start[0]) < 1e-9 and abs(end[1] - start[1]) < 1e-9:
+            return
+
+        def do() -> None:
+            self.project.set_offset(*end)
+            self._invalidate_layers()
+            self.changed.emit()
+            self.info_changed.emit()
+
+        def undo() -> None:
+            self.project.set_offset(*start)
+            self._invalidate_layers()
+            self.changed.emit()
+            self.info_changed.emit()
+
+        self._invalidate_layers()
+        self.history.push(FunctionCommand("Move part", do, undo), execute=False)
+
+    def begin_cut_move(self, index: int) -> None:
+        import copy
+
+        if 0 <= index < len(self.project.manual_cuts):
+            self._cut_move_snapshot = copy.deepcopy(self.project.manual_cuts)
+
+    def move_cut(self, index: int, dy: float, dz: float) -> None:
+        if not (0 <= index < len(self.project.manual_cuts)):
+            return
+        cut = self.project.manual_cuts[index]
+        if cut.kind == CutKind.Y:
+            cut.meta["y"] = cut.meta.get("y", 0.0) + dy
+            cut.c_base = -cut.meta["y"]
+        elif cut.kind == CutKind.Z:
+            cut.meta["z"] = cut.meta.get("z", 0.0) + dz
+            cut.c_base = -cut.meta["z"]
+        else:  # diagonal: translate the line a·y + b·z + c = 0 by (dy, dz)
+            cut.c_base = cut.c_base - (cut.a * dy) - (cut.b * dz)
+        self._invalidate_layers()
+        self.changed.emit()
+        self.info_changed.emit()
+
+    def end_cut_move(self, index: int) -> None:
+        before = getattr(self, "_cut_move_snapshot", None)
+        self._cut_move_snapshot = None
+        if before is None:
+            return
+        import copy
+
+        after = copy.deepcopy(self.project.manual_cuts)
+
+        def do() -> None:
+            self.project.manual_cuts = copy.deepcopy(after)
+            self._invalidate_layers()
+            self.changed.emit()
+            self.info_changed.emit()
+
+        def undo() -> None:
+            self.project.manual_cuts = copy.deepcopy(before)
+            self._invalidate_layers()
+            self.changed.emit()
+            self.info_changed.emit()
+
+        self.history.push(FunctionCommand("Move cut", do, undo), execute=False)
 
     # ── parameters ────────────────────────────────────────────────────
     def set_speed(self, value: float) -> None:

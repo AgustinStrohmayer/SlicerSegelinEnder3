@@ -46,6 +46,14 @@ class CanvasView(QGraphicsView):
         self._pan_last = QPoint()
         self._press_pos = QPoint()
         self._maybe_click = False
+        # Direct manipulation: the window installs these. ``hit_test(QPointF)``
+        # returns an opaque handle (or None); dragging on a hit grabs the object
+        # instead of panning.
+        self.hit_test = None
+        self.on_object_drag = None       # (handle, dy, dz) live during drag
+        self.on_object_drag_end = None   # (handle) on release
+        self._drag_handle = None
+        self._drag_last = QPointF()
 
     # ── input ────────────────────────────────────────────────────────
     def wheelEvent(self, event: QWheelEvent) -> None:
@@ -74,10 +82,20 @@ class CanvasView(QGraphicsView):
         super().keyPressEvent(event)
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
+        pos = event.position().toPoint()
+        # Left-press on a draggable object grabs it (move); empty space pans.
+        if event.button() == Qt.MouseButton.LeftButton and self.hit_test is not None:
+            handle = self.hit_test(self.mapToScene(pos))
+            if handle is not None:
+                self._drag_handle = handle
+                self._drag_last = self.mapToScene(pos)
+                self.viewport().setCursor(Qt.CursorShape.SizeAllCursor)
+                event.accept()
+                return
         if event.button() in (Qt.MouseButton.LeftButton, Qt.MouseButton.MiddleButton):
             self._pan_active = True
-            self._pan_last = event.position().toPoint()
-            self._press_pos = self._pan_last
+            self._pan_last = pos
+            self._press_pos = pos
             self._maybe_click = event.button() == Qt.MouseButton.LeftButton
             self.viewport().setCursor(Qt.CursorShape.ClosedHandCursor)
             event.accept()
@@ -86,6 +104,15 @@ class CanvasView(QGraphicsView):
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:
         pos = event.position().toPoint()
+        scene_pt = self.mapToScene(pos)
+        if self._drag_handle is not None:
+            dy = scene_pt.x() - self._drag_last.x()
+            dz = scene_pt.y() - self._drag_last.y()
+            self._drag_last = scene_pt
+            if self.on_object_drag is not None:
+                self.on_object_drag(self._drag_handle, dy, dz)
+            self.cursorMoved.emit(scene_pt.x(), scene_pt.y())
+            return
         if self._pan_active:
             delta = pos - self._pan_last
             self._pan_last = pos
@@ -95,11 +122,29 @@ class CanvasView(QGraphicsView):
             v.setValue(v.value() - delta.y())
             if (pos - self._press_pos).manhattanLength() > _CLICK_SLOP:
                 self._maybe_click = False
-        scene_pt = self.mapToScene(pos)
+        else:
+            # Hover feedback: show the move cursor over grabbable objects.
+            self._update_hover_cursor(scene_pt)
         self.cursorMoved.emit(scene_pt.x(), scene_pt.y())
         super().mouseMoveEvent(event)
 
+    def _update_hover_cursor(self, scene_pt: QPointF) -> None:
+        if self.hit_test is None:
+            return
+        grabbable = self.hit_test(scene_pt) is not None
+        if grabbable:
+            self.viewport().setCursor(Qt.CursorShape.OpenHandCursor)
+        elif self.viewport().cursor().shape() == Qt.CursorShape.OpenHandCursor:
+            self.viewport().unsetCursor()
+
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
+        if self._drag_handle is not None and event.button() == Qt.MouseButton.LeftButton:
+            if self.on_object_drag_end is not None:
+                self.on_object_drag_end(self._drag_handle)
+            self._drag_handle = None
+            self.viewport().unsetCursor()
+            event.accept()
+            return
         if self._pan_active and event.button() in (Qt.MouseButton.LeftButton, Qt.MouseButton.MiddleButton):
             self._pan_active = False
             self.viewport().unsetCursor()

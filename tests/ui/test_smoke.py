@@ -123,3 +123,32 @@ def test_view_modes(app):
     for mode in ("grid", "split", "single"):
         w._set_view_mode(mode)
         assert w.view_mode == mode
+
+
+def test_drag_part_and_cut(app, demo_dxf):
+    from appSlicerSegelin.v2.ui.main_window import MainWindow
+
+    w = MainWindow()
+    c = w.controller
+    c.import_dxf(demo_dxf)
+
+    # Drag the part: offsets move, and undo restores them.
+    oy, oz = c.project.offset_y, c.project.offset_z
+    c.begin_part_move()
+    c.move_part_to(oy + 10.0, oz + 5.0)
+    c.end_part_move()
+    assert abs(c.project.offset_y - (oy + 10.0)) < 1e-6
+    assert abs(c.project.offset_z - (oz + 5.0)) < 1e-6
+    assert c.undo()
+    assert abs(c.project.offset_y - oy) < 1e-6 and abs(c.project.offset_z - oz) < 1e-6
+
+    # Drag a manual Y cut: its value moves, and undo restores it.
+    c.set_use_manual_cuts(True)
+    c.add_manual_y(40.0)
+    y0 = c.project.manual_cuts[0].meta["y"]
+    c.begin_cut_move(0)
+    c.move_cut(0, 7.0, 0.0)
+    c.end_cut_move(0)
+    assert abs(c.project.manual_cuts[0].meta["y"] - (y0 + 7.0)) < 1e-6
+    assert c.undo()
+    assert abs(c.project.manual_cuts[0].meta["y"] - y0) < 1e-6
