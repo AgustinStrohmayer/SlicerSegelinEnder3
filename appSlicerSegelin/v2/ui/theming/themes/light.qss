@@ -53,6 +53,12 @@ QLabel#MutedLabel, QLabel[class="muted"] {
     font-size: {{typography.size_small}}px;
 }
 
+/* Technical numerals (dimensions, times, coordinates) read better mono. */
+QLabel[role="mono"] {
+    font-family: {{typography.family_mono}};
+    letter-spacing: 0.2px;
+}
+
 /* ============== TOOLBAR ============== */
 QToolBar {
     background: {{color.surface}};

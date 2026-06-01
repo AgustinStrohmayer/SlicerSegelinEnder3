@@ -77,45 +77,48 @@ class Tokens:
     typography: TypeTokens = field(default_factory=TypeTokens)
 
 
+# Palette: Slate neutral ramp + Indigo accent — a calm, high-contrast,
+# professional pairing (Linear / Vercel / Tailwind-docs lineage). Text and
+# muted tones meet WCAG AA on their intended surfaces.
 DARK = Tokens(
     name="dark",
     color=ColorTokens(
-        bg="#0C0E13",
-        surface="#15181F",
-        surface_alt="#1B1F29",
-        elevated="#242A38",
-        border="#272D3A",
-        border_strong="#363F50",
-        text="#E8EAF0",
-        muted="#969FB2",
-        accent="#8268FF",
-        accent_hover="#9C86FF",
-        accent_soft="#241F3C",
+        bg="#0A0E16",          # app canvas — deep slate
+        surface="#121826",     # panels: toolbar, sidebar, menus
+        surface_alt="#1B2335",  # cards, tiles (clearly raised off the panel)
+        elevated="#27324A",    # buttons / hover fills
+        border="#28324A",      # hairline separators
+        border_strong="#3C4A66",  # input outlines, card edges
+        text="#F1F5F9",        # slate-100
+        muted="#94A3B8",       # slate-400 — secondary text
+        accent="#6366F1",      # indigo-500
+        accent_hover="#818CF8",  # indigo-400
+        accent_soft="#1E1B4B",  # indigo-950 — selection / pressed fills
         on_accent="#FFFFFF",
-        success="#34D399",
-        warning="#F5A524",
-        danger="#F2585B",
+        success="#22C55E",
+        warning="#F59E0B",
+        danger="#F05252",
     ),
 )
 
 LIGHT = Tokens(
     name="light",
     color=ColorTokens(
-        bg="#EAEDF2",
-        surface="#FFFFFF",
-        surface_alt="#F1F3F9",
-        elevated="#FFFFFF",
-        border="#E4E7EF",
-        border_strong="#D8DDE7",
-        text="#1B1E26",
-        muted="#69728A",
-        accent="#6D4AFF",
-        accent_hover="#5B38F0",
-        accent_soft="#ECE8FF",
+        bg="#EBEEF4",          # app canvas — cool slate-100/200
+        surface="#FFFFFF",     # panels
+        surface_alt="#F1F5F9",  # slate-100 cards / inputs
+        elevated="#FFFFFF",    # buttons (white, raised on slate panels)
+        border="#E2E8F0",      # slate-200
+        border_strong="#CBD5E1",  # slate-300
+        text="#0F172A",        # slate-900 — strong contrast
+        muted="#475569",       # slate-600 — readable secondary
+        accent="#4F46E5",      # indigo-600
+        accent_hover="#4338CA",  # indigo-700
+        accent_soft="#E0E7FF",  # indigo-100
         on_accent="#FFFFFF",
-        success="#0E9F6E",
-        warning="#C2710C",
-        danger="#E02424",
+        success="#16A34A",
+        warning="#D97706",
+        danger="#DC2626",
     ),
 )
 

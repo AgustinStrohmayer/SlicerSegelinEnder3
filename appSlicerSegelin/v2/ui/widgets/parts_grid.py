@@ -26,8 +26,8 @@ from PyQt6.QtWidgets import (
 
 from ..controllers.project_controller import ProjectController
 
-TILE_W = 210
-TILE_H = 188
+TILE_W = 224
+TILE_H = 204
 
 
 def _fmt_dur(seconds: float) -> str:
@@ -40,7 +40,7 @@ class _PartPreview(QWidget):
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self.setMinimumHeight(108)
+        self.setMinimumHeight(130)
         self._segs: list = []
         self._color = QColor("#7C5CFF")
         self._enabled = True
@@ -115,6 +115,7 @@ class PartTile(QFrame):
         lay.addWidget(self._preview, 1)
 
         self._foot = QLabel("")
+        self._foot.setProperty("role", "mono")
         self._foot.setProperty("class", "muted")
         lay.addWidget(self._foot)
 

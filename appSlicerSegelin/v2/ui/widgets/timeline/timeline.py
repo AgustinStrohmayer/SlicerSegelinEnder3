@@ -40,6 +40,9 @@ class Timeline(QWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setObjectName("Timeline")
+        # Plain QWidgets ignore a stylesheet background unless flagged; without
+        # this the bar composites to black in light mode.
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         root = QVBoxLayout(self)
         root.setContentsMargins(14, 8, 14, 10)
         root.setSpacing(6)
