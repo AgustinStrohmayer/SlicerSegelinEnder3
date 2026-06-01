@@ -116,6 +116,16 @@ def test_per_part_settings_and_exclude(app, demo_dxf, tmp_path):
     assert len(list(tmp_path.glob("*.gcode"))) == n - 1
 
 
+def test_canvas_overlay_is_mouse_transparent(app):
+    """The canvas overlay must not eat mouse events meant for the view."""
+    from PyQt6.QtCore import Qt
+
+    from appSlicerSegelin.v2.ui.main_window import MainWindow
+
+    w = MainWindow()
+    assert w.canvas.overlay.testAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+
+
 def test_view_modes(app):
     from appSlicerSegelin.v2.ui.main_window import MainWindow
 

@@ -130,7 +130,11 @@ class CanvasOverlay(QWidget):
 
     def __init__(self, parent: QWidget) -> None:
         super().__init__(parent)
-        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, False)
+        # The overlay spans the whole canvas; it must NOT eat mouse events or
+        # panning/dragging/clicking on the canvas beneath it stops working.
+        # Events fall through to the view; the child controls (which are not
+        # transparent) still receive their own clicks.
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         self.controls = FloatingControls(self)
         self.coord = CoordReadout(self)
         self.zoom_badge = ZoomBadge(self)
