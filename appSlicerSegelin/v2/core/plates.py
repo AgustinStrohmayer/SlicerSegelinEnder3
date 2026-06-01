@@ -38,6 +38,7 @@ class Layer:
     row: int = 0
     col: int = 0
     part_index: int = 0
+    add_unions: bool = True  # how this part's trajectory was built (for rebuilds)
 
     @property
     def label(self) -> str:
@@ -118,6 +119,7 @@ def split_into_plates(
                     z_max=cz_max,
                     row=row + 1,
                     col=col + 1,
+                    add_unions=True,
                 )
             )
     return layers
@@ -229,6 +231,7 @@ def partition_by_manual_cuts(
                 z_min=z_min,
                 z_max=z_max,
                 part_index=idx,
+                add_unions=False,
             )
         )
     return layers

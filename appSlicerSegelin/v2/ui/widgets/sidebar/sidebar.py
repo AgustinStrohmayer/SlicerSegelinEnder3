@@ -63,11 +63,13 @@ class Sidebar(QScrollArea):
     export_gcode_requested = pyqtSignal()
     export_dxf_requested = pyqtSignal()
     export_batch_requested = pyqtSignal()
+    export_part_requested = pyqtSignal(int)
     diagonal_requested = pyqtSignal()
 
     def __init__(self, controller: ProjectController, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.c = controller
+        self._current_part = -1
         self.setObjectName("Sidebar")
         self.setWidgetResizable(True)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
@@ -85,6 +87,7 @@ class Sidebar(QScrollArea):
         root.addWidget(self._section_cut())
         root.addWidget(self._section_area())
         root.addWidget(self._section_manual())
+        root.addWidget(self._section_part())
         root.addWidget(self._section_layers())
         root.addWidget(self._section_export())
         root.addStretch(1)
@@ -94,6 +97,7 @@ class Sidebar(QScrollArea):
         self.c.info_changed.connect(self._refresh_manual_list)
         self._refresh_layer_state()
         self._refresh_manual_list()
+        self.update_part_panel()
 
     # ── 1. File ───────────────────────────────────────────────────────
     def _section_file(self) -> CollapsibleSection:
@@ -297,6 +301,124 @@ class Sidebar(QScrollArea):
 
     def set_diagonal_status(self, text: str) -> None:
         self.lbl_diag.setText(text)
+
+    # ── Selected part (per-part overrides) ────────────────────────────
+    _SWATCHES = ("#7C5CFF", "#34D399", "#F59E0B", "#F2585B", "#38BDF8", "#E879F9")
+
+    def _section_part(self) -> CollapsibleSection:
+        s = CollapsibleSection("Selected part", expanded=True)
+        self.part_section = s
+        self.lbl_part = QLabel("Select a part in the grid")
+        self.lbl_part.setProperty("class", "muted")
+        s.add(self.lbl_part)
+
+        self.in_part_label = QLineEdit()
+        self.in_part_label.setPlaceholderText("Part name")
+        self.in_part_label.setToolTip("Rename this part (used in the grid and export filenames)")
+        self.in_part_label.editingFinished.connect(self._on_part_label)
+        s.add_layout(_row(QLabel("Name"), self.in_part_label))
+
+        self.chk_part_enabled = QCheckBox("Include in export & simulation")
+        self.chk_part_enabled.setToolTip("Uncheck to skip this part everywhere")
+        self.chk_part_enabled.toggled.connect(self._on_part_enabled)
+        s.add(self.chk_part_enabled)
+
+        self.chk_part_reverse = QCheckBox("Reverse cut direction")
+        self.chk_part_reverse.setToolTip("Reverse the wire path for this part only")
+        self.chk_part_reverse.toggled.connect(self._on_part_reverse)
+        s.add(self.chk_part_reverse)
+
+        self.in_part_speed = _num_input("", 70)
+        self.in_part_speed.setPlaceholderText("global")
+        self.in_part_speed.setToolTip("Override the cut speed for this part (blank = use global)")
+        self.in_part_speed.editingFinished.connect(self._on_part_speed)
+        s.add_layout(_row(QLabel("Speed mm/s"), self.in_part_speed))
+
+        swatches = QHBoxLayout()
+        swatches.setContentsMargins(0, 0, 0, 0)
+        swatches.setSpacing(5)
+        swatches.addWidget(QLabel("Colour"))
+        for hexc in (None, *self._SWATCHES):
+            b = QPushButton()
+            b.setFixedSize(20, 20)
+            b.setCursor(Qt.CursorShape.PointingHandCursor)
+            if hexc is None:
+                b.setText("○")
+                b.setToolTip("Default colour")
+            else:
+                b.setStyleSheet(
+                    f"background:{hexc}; border-radius:10px; border:1px solid rgba(0,0,0,0.25);"
+                )
+                b.setToolTip(hexc)
+            b.clicked.connect(lambda _checked=False, c=hexc: self._on_part_color(c))
+            swatches.addWidget(b)
+        swatches.addStretch(1)
+        s.add_layout(swatches)
+
+        self.b_export_part = QPushButton("Export this part…")
+        self.b_export_part.setToolTip("Save G-code for just this part")
+        self.b_export_part.clicked.connect(self._on_export_part)
+        s.add(self.b_export_part)
+        return s
+
+    def update_part_panel(self) -> None:
+        idx = self.c.focused_layer
+        has = 0 <= idx < len(self.c.layers)
+        self._current_part = idx if has else -1
+        self.part_section.setVisible(bool(self.c.layers))
+        for w in (
+            self.in_part_label, self.chk_part_enabled, self.chk_part_reverse,
+            self.in_part_speed, self.b_export_part,
+        ):
+            w.setEnabled(has)
+        if not has:
+            self.lbl_part.setText("Select a part in the grid")
+            return
+        ps = self.c.part_settings[idx]
+        self.lbl_part.setText(f"{self.c.part_label(idx)}  ·  {idx + 1}/{len(self.c.layers)}")
+        for w, value in (
+            (self.in_part_label, ps.label or ""),
+            (self.in_part_speed, "" if ps.speed_mm_s is None else f"{ps.speed_mm_s:g}"),
+        ):
+            w.blockSignals(True)
+            w.setText(value)
+            w.blockSignals(False)
+        for chk, on in ((self.chk_part_enabled, ps.enabled), (self.chk_part_reverse, ps.reverse)):
+            chk.blockSignals(True)
+            chk.setChecked(on)
+            chk.blockSignals(False)
+
+    def _on_part_enabled(self, on: bool) -> None:
+        if self._current_part >= 0:
+            self.c.set_part_enabled(self._current_part, on)
+
+    def _on_part_reverse(self, on: bool) -> None:
+        if self._current_part >= 0:
+            self.c.set_part_reverse(self._current_part, on)
+
+    def _on_part_speed(self) -> None:
+        if self._current_part < 0:
+            return
+        text = self.in_part_speed.text().replace(",", ".").strip()
+        if not text:
+            self.c.set_part_speed(self._current_part, None)
+            return
+        try:
+            self.c.set_part_speed(self._current_part, float(text))
+        except ValueError:
+            pass
+
+    def _on_part_label(self) -> None:
+        if self._current_part >= 0:
+            self.c.set_part_label(self._current_part, self.in_part_label.text().strip())
+
+    def _on_part_color(self, color: str | None) -> None:
+        if self._current_part >= 0:
+            self.c.set_part_color(self._current_part, color)
+
+    def _on_export_part(self) -> None:
+        if self._current_part >= 0:
+            self.export_part_requested.emit(self._current_part)
 
     # ── 6. Layers / preview ───────────────────────────────────────────
     def _section_layers(self) -> CollapsibleSection:

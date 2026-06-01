@@ -33,6 +33,16 @@ def export_standard(project: Project) -> str:
     return emit_gcode(plan)
 
 
+def export_single(project: Project, trajectory, speed_mm_s: float, notes: tuple[str, ...] = ()) -> str:  # type: ignore[no-untyped-def]
+    """G-code for one pre-built trajectory at a specific feed (mm/s)."""
+    from dataclasses import replace as _replace
+
+    feed = max(1.0, speed_mm_s * 60.0)
+    machine = _replace(project.machine, feed_cut_mm_min=feed, feed_travel_mm_min=feed)
+    plan = slicer_service.cut_plan(list(trajectory), machine, notes=notes)
+    return emit_gcode(plan)
+
+
 def export_layers(project: Project) -> list[GcodeFile]:
     """One G-code file per layer/part. Returns ``[]`` if no layers."""
     layers = slicer_service.build_layers(project)

@@ -15,6 +15,7 @@ from ...core.commands import CommandStack, FunctionCommand
 from ...core.errors import SlicerError
 from ...core.geometry import BBox, Point, Segment
 from ...core.manual_cuts import make_two_point_cut, make_y_cut, make_z_cut
+from ...core.part_settings import PartSettings
 from ...core.plates import Layer
 from ...core.project import Project
 from ...core.trajectory import build_full_trajectory, total_duration
@@ -30,12 +31,15 @@ class ProjectController(QObject):
     layers_changed = pyqtSignal()
     # Emitted when info displays should refresh (dimensions, time, etc.).
     info_changed = pyqtSignal()
+    # Emitted when a per-part setting changes (colour/enabled/speed/…).
+    parts_changed = pyqtSignal()
 
     def __init__(self, project: Project | None = None) -> None:
         super().__init__()
         self.project = project or Project()
         self.history = CommandStack()
         self.layers: list[Layer] = []
+        self.part_settings: list[PartSettings] = []
         self.focused_layer: int = -1  # -1 = full view
         self.pending_diagonal: Point | None = None
         # Bytes of the original DXF, kept around so .ssproj saves embed it.
@@ -65,6 +69,7 @@ class ProjectController(QObject):
     def _invalidate_layers(self) -> None:
         if self.layers or self.focused_layer != -1:
             self.layers = []
+            self.part_settings = []
             self.focused_layer = -1
             self.layers_changed.emit()
 
@@ -289,10 +294,71 @@ class ProjectController(QObject):
             self.notify.emit("No preview", "Could not generate any part.", "warning")
             return
         self.layers = layers
+        self._sync_part_settings()
         self.focused_layer = 0
         self.layers_changed.emit()
         self.changed.emit()
         self.notify.emit("Preview ready", f"{len(layers)} parts", "success")
+
+    def _sync_part_settings(self) -> None:
+        """Keep one PartSettings per layer, preserving prior choices by index."""
+        kept = self.part_settings[: len(self.layers)]
+        while len(kept) < len(self.layers):
+            kept.append(PartSettings())
+        self.part_settings = kept
+        # Re-apply any reverse overrides to the freshly built trajectories.
+        for i, ps in enumerate(self.part_settings):
+            if ps.reverse:
+                self._rebuild_layer_trajectory(i)
+
+    def part_setting(self, index: int) -> PartSettings:
+        return self.part_settings[index]
+
+    def _rebuild_layer_trajectory(self, index: int) -> None:
+        layer = self.layers[index]
+        ps = self.part_settings[index]
+        layer.trajectory = build_full_trajectory(
+            layer.local_segments, add_unions=layer.add_unions, reverse=ps.reverse
+        )
+
+    # ── per-part settings ─────────────────────────────────────────────
+    def set_part_enabled(self, index: int, enabled: bool) -> None:
+        self.part_settings[index].enabled = enabled
+        self.parts_changed.emit()
+        self.changed.emit()
+        self.info_changed.emit()
+
+    def set_part_reverse(self, index: int, reverse: bool) -> None:
+        self.part_settings[index].reverse = reverse
+        self._rebuild_layer_trajectory(index)
+        self.parts_changed.emit()
+        self.changed.emit()
+        self.info_changed.emit()
+
+    def set_part_speed(self, index: int, speed: float | None) -> None:
+        self.part_settings[index].speed_mm_s = speed
+        self.parts_changed.emit()
+        self.info_changed.emit()
+
+    def set_part_color(self, index: int, color: str | None) -> None:
+        self.part_settings[index].color = color
+        self.parts_changed.emit()
+        self.changed.emit()
+
+    def set_part_label(self, index: int, label: str | None) -> None:
+        self.part_settings[index].label = label or None
+        self.parts_changed.emit()
+
+    def part_label(self, index: int) -> str:
+        ps = self.part_settings[index]
+        return ps.label or self.layers[index].label
+
+    def part_speed(self, index: int) -> float:
+        ps = self.part_settings[index]
+        return ps.speed_mm_s if ps.speed_mm_s is not None else self.project.speed_mm_s
+
+    def part_duration_s(self, index: int) -> float:
+        return total_duration(self.layers[index].trajectory, self.part_speed(index))
 
     def move_layer(self, delta: int) -> None:
         if not self.layers:
@@ -304,6 +370,12 @@ class ProjectController(QObject):
         self.focused_layer = -1
         self.changed.emit()
 
+    def focus_layer(self, index: int) -> None:
+        if 0 <= index < len(self.layers):
+            self.focused_layer = index
+            self.changed.emit()
+            self.info_changed.emit()
+
     # ── simulation info ───────────────────────────────────────────────
     def active_trajectory(self) -> list[Segment]:
         if 0 <= self.focused_layer < len(self.layers):
@@ -311,6 +383,15 @@ class ProjectController(QObject):
         return slicer_service.standard_trajectory(self.project)
 
     def estimated_time_s(self) -> float:
+        if 0 <= self.focused_layer < len(self.layers):
+            return self.part_duration_s(self.focused_layer)
+        if self.layers:
+            # Full view: sum the enabled parts.
+            return sum(
+                self.part_duration_s(i)
+                for i, ps in enumerate(self.part_settings)
+                if ps.enabled
+            )
         return total_duration(self.active_trajectory(), self.project.speed_mm_s)
 
     def dimensions(self) -> tuple[float, float] | None:
@@ -395,19 +476,50 @@ class ProjectController(QObject):
     def export_layers_gcode(self, folder: str) -> int:
         import os
 
-        files = gcode_service.export_layers(self.project)
-        if not files:
+        if not self.layers:
             self.notify.emit("No layers", "Generate a plate/cut preview first.", "warning")
             return 0
+        enabled = [i for i, ps in enumerate(self.part_settings) if ps.enabled]
+        if not enabled:
+            self.notify.emit("All parts excluded", "Enable at least one part to export.", "warning")
+            return 0
+        base = self.project.batch_basename or "cut"
+        total = len(enabled)
         try:
-            for f in files:
-                with open(os.path.join(folder, f.filename), "w", encoding="utf-8") as fh:
-                    fh.write(f.content)
+            for n, i in enumerate(enabled, start=1):
+                layer = self.layers[i]
+                content = gcode_service.export_single(
+                    self.project,
+                    layer.trajectory,
+                    self.part_speed(i),
+                    notes=(f"Part {n} of {total} — {self.part_label(i)}",),
+                )
+                kind = "manual_part" if layer.part_index else "plate"
+                fname = f"{base}_{kind}{n:02d}_of_{total:02d}.gcode"
+                with open(os.path.join(folder, fname), "w", encoding="utf-8") as fh:
+                    fh.write(content)
         except OSError as exc:
             self.notify.emit("Batch export failed", str(exc), "danger")
             return 0
-        self.notify.emit("Batch exported", f"{len(files)} files → {folder}", "success")
-        return len(files)
+        self.notify.emit("Batch exported", f"{total} files → {folder}", "success")
+        return total
+
+    def export_part_gcode(self, index: int, path: str) -> bool:
+        if not (0 <= index < len(self.layers)):
+            return False
+        layer = self.layers[index]
+        try:
+            content = gcode_service.export_single(
+                self.project, layer.trajectory, self.part_speed(index),
+                notes=(self.part_label(index),),
+            )
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write(content)
+        except OSError as exc:
+            self.notify.emit("Export failed", str(exc), "danger")
+            return False
+        self.notify.emit("Part exported", f"{self.part_label(index)} → {path}", "success")
+        return True
 
     def export_dxf(self, path: str) -> bool:
         from ...io.dxf_writer import write_dxf

@@ -487,6 +487,34 @@ QStatusBar QLabel[role="mono"] {
     color: {{color.text}};
 }
 
+/* ============== PARTS GRID ============== */
+QScrollArea#PartsGrid {
+    background: {{color.bg}};
+    border: none;
+    border-left: 1px solid {{color.border}};
+}
+QScrollArea#PartsGrid > QWidget#qt_scrollarea_viewport,
+QWidget#PartsGridBody {
+    background: {{color.bg}};
+}
+
+QFrame#PartTile {
+    background: {{color.surface}};
+    border: 1px solid {{color.border}};
+    border-radius: {{radius.md}}px;
+}
+QFrame#PartTile:hover {
+    border-color: {{color.border_strong}};
+}
+QFrame#PartTile[selected="true"] {
+    border: 2px solid {{color.accent}};
+}
+QFrame#PartTile QLabel[role="title"] {
+    font-size: {{typography.size_body}}px;
+    font-weight: 600;
+    color: {{color.text}};
+}
+
 /* ============== TIMELINE ============== */
 QWidget#Timeline {
     background: {{color.surface}};

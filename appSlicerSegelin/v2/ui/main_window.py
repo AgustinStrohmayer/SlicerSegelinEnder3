@@ -30,6 +30,7 @@ from .theming.tokens import ThemeName, get_tokens
 from .widgets.canvas.canvas_container import CanvasContainer
 from .widgets.canvas.scene import SceneModel, ScenePalette
 from .widgets.command_palette import CommandEntry, CommandPalette, CommandRegistry
+from .widgets.parts_grid import PartsGrid
 from .widgets.recent_menu import RecentMenu
 from .widgets.shortcuts_overlay import ShortcutsOverlay
 from .widgets.sidebar.sidebar import Sidebar
@@ -59,7 +60,23 @@ class MainWindow(QMainWindow):
         self.view = self.canvas.view
         self.scene = self.canvas.scene
         self.view.clicked.connect(self._on_canvas_click)
-        self.setCentralWidget(self.canvas)
+
+        # Parts gallery sits beside the canvas in a splitter; toggling each
+        # side's visibility gives the single / grid / split view modes.
+        self.parts_grid = PartsGrid(self.controller, self)
+        self.parts_grid.part_selected.connect(self._on_part_selected)
+        self.parts_grid.part_enabled_toggled.connect(self.controller.set_part_enabled)
+        from PyQt6.QtWidgets import QSplitter
+
+        self._center_split = QSplitter(Qt.Orientation.Horizontal, self)
+        self._center_split.addWidget(self.parts_grid)
+        self._center_split.addWidget(self.canvas)
+        self._center_split.setStretchFactor(0, 1)
+        self._center_split.setStretchFactor(1, 1)
+        self._center_split.setSizes([520, 980])
+        self.setCentralWidget(self._center_split)
+        self.view_mode = "single"
+        self.parts_grid.hide()
         self._apply_scene_palette()
 
         # Toasts + palette + shortcuts overlay
@@ -94,6 +111,10 @@ class MainWindow(QMainWindow):
         self.controller.changed.connect(self._refresh_info)
         self.controller.info_changed.connect(self._refresh_info)
         self.controller.layers_changed.connect(self._refresh_canvas)
+        self.controller.layers_changed.connect(self._on_layers_changed)
+        self.controller.parts_changed.connect(self.parts_grid.refresh)
+        self.controller.parts_changed.connect(self._update_part_panel)
+        self.controller.changed.connect(self.parts_grid.refresh)
         self.controller.notify.connect(self._on_notify)
 
         # Canvas readouts — connected now that the status bar exists.
@@ -118,6 +139,7 @@ class MainWindow(QMainWindow):
         self.sidebar.export_gcode_requested.connect(self._on_export_gcode)
         self.sidebar.export_dxf_requested.connect(self._on_export_dxf)
         self.sidebar.export_batch_requested.connect(self._on_export_batch)
+        self.sidebar.export_part_requested.connect(self._on_export_part)
         self.sidebar.diagonal_requested.connect(self._start_diagonal_pick)
         dock = QDockWidget("Workspace", self)
         dock.setObjectName("SidebarDock")
@@ -183,6 +205,7 @@ class MainWindow(QMainWindow):
         spacer = QWidget(self)
         spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         bar.addWidget(spacer)
+        act("layers", "Cycle view: single / split / grid", self._cycle_view)
         act("command", "Command palette (Ctrl+K)", self.palette.open)
         act("help", "Keyboard shortcuts (?)", self._open_shortcuts_overlay)
         self._theme_action = act("moon" if self.theme == "light" else "sun", "Toggle theme", self._toggle_theme, "Ctrl+T")
@@ -223,6 +246,11 @@ class MainWindow(QMainWindow):
 
         m = mb.addMenu("&View")
         add(m, "Fit to content", self.view.fit_to_content, "F")
+        m.addSeparator()
+        add(m, "Single canvas", lambda: self._set_view_mode("single"), "Ctrl+1")
+        add(m, "Parts grid", lambda: self._set_view_mode("grid"), "Ctrl+2")
+        add(m, "Split view", lambda: self._set_view_mode("split"), "Ctrl+3")
+        m.addSeparator()
         add(m, "Toggle theme", self._toggle_theme, "Ctrl+T")
         add(m, "Keyboard shortcuts…", self._open_shortcuts_overlay)
 
@@ -311,6 +339,13 @@ class MainWindow(QMainWindow):
         if folder:
             self.controller.export_layers_gcode(folder)
 
+    def _on_export_part(self, index: int) -> None:
+        label = self.controller.part_label(index)
+        suggested = f"{self.controller.project.batch_basename or 'cut'}_{label.replace(' ', '')}.gcode"
+        path, _ = QFileDialog.getSaveFileName(self, "Export part G-code", suggested, filter="G-code (*.gcode)")
+        if path:
+            self.controller.export_part_gcode(index, path)
+
     def _on_save_archive(self) -> None:
         suggested = self.controller.project.source_dxf_name or "project"
         suggested = Path(suggested).stem + ".ssproj"
@@ -376,6 +411,42 @@ class MainWindow(QMainWindow):
         name = self.controller.project.source_dxf_name
         prefix = Path(name).stem if name else "Untitled"
         self.setWindowTitle(f"{prefix} — SlicerSegelinEnder3")
+
+    # ── parts grid / view modes ───────────────────────────────────────
+    def _on_layers_changed(self) -> None:
+        self.parts_grid.rebuild()
+        if self.controller.layers and self.view_mode == "single":
+            self._set_view_mode("split")
+        elif not self.controller.layers and self.view_mode != "single":
+            self._set_view_mode("single")
+        self._update_part_panel()
+
+    def _on_part_selected(self, index: int) -> None:
+        self.controller.focus_layer(index)
+        self.parts_grid.set_selected(index)
+        self._update_part_panel()
+        if self.canvas.isVisible():
+            QTimer.singleShot(0, self.view.fit_to_content)
+
+    def _set_view_mode(self, mode: str) -> None:
+        self.view_mode = mode
+        self.parts_grid.setVisible(mode in ("grid", "split"))
+        self.canvas.setVisible(mode in ("single", "split"))
+        if mode == "split":
+            self._center_split.setSizes([520, 980])
+        # Re-frame once the new layout has settled (canvas width changed).
+        if self.canvas.isVisible():
+            QTimer.singleShot(0, self.view.fit_to_content)
+        self.statusBar().showMessage(f"View: {mode}", 1500)
+
+    def _cycle_view(self) -> None:
+        order = ["single", "split", "grid"]
+        nxt = order[(order.index(self.view_mode) + 1) % len(order)]
+        self._set_view_mode(nxt)
+
+    def _update_part_panel(self) -> None:
+        """Refresh the sidebar's per-part editor for the focused part."""
+        self.sidebar.update_part_panel()
 
     # ── shortcuts overlay ─────────────────────────────────────────────
     def _open_shortcuts_overlay(self) -> None:
@@ -494,6 +565,12 @@ class MainWindow(QMainWindow):
         segments, traj, entry, manual = self._current_view_geometry()
         fraction = self.timeline.progress_fraction()
         focused = 0 <= c.focused_layer < len(c.layers)
+        # Tint the focused part with its chosen colour (falls back to accent).
+        accent = get_tokens(self.theme).color.accent
+        if focused:
+            self.scene.palette.cut = c.part_settings[c.focused_layer].color or accent
+        else:
+            self.scene.palette.cut = accent
         model = SceneModel(
             segments=segments,
             trajectory=traj,
@@ -534,6 +611,7 @@ class MainWindow(QMainWindow):
             )
         )
         self.canvas.apply_ruler_palette(tokens)
+        self.parts_grid.set_palette(t.accent)
 
     def _recolor_icons(self) -> None:
         """Re-tint every themeable icon for the active theme.
