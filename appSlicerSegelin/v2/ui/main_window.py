@@ -68,6 +68,10 @@ class MainWindow(QMainWindow):
         self.view.deleteSelection.connect(self._delete_selection)
         self._dragging_obj = False
         self._selection = None  # ("part", None) | ("cut", i) | None
+        self._snap_enabled = True
+        self._drag_raw = None          # unsnapped accumulator during a drag
+        self._guides: list = []        # snap guide lines for the scene
+        self._live_label = None        # (text, y, z) shown near the cursor
 
         # Parts gallery sits beside the canvas in a splitter; toggling each
         # side's visibility gives the single / grid / split view modes.
@@ -284,6 +288,13 @@ class MainWindow(QMainWindow):
         add(m, "Single canvas", lambda: self._set_view_mode("single"), "Ctrl+1")
         add(m, "Parts grid", lambda: self._set_view_mode("grid"), "Ctrl+2")
         add(m, "Split view", lambda: self._set_view_mode("split"), "Ctrl+3")
+        m.addSeparator()
+        self._snap_action = QAction("Snap to guides", self)
+        self._snap_action.setCheckable(True)
+        self._snap_action.setChecked(self._snap_enabled)
+        self._snap_action.setToolTip("Snap the part/cuts to the bed centre, edges and grid while dragging")
+        self._snap_action.toggled.connect(self._toggle_snap)
+        m.addAction(self._snap_action)
         m.addSeparator()
         add(m, "Toggle theme", self._toggle_theme, "Ctrl+T")
         add(m, "Keyboard shortcuts…", self._open_shortcuts_overlay)
@@ -611,6 +622,9 @@ class MainWindow(QMainWindow):
         self._show_dims = on
         self._refresh_canvas()
 
+    def _toggle_snap(self, on: bool) -> None:
+        self._snap_enabled = on
+
     # ── direct manipulation (drag part / cuts) ────────────────────────
     def _scene_tolerance(self, px: float = 9.0) -> float:
         """``px`` screen pixels expressed in scene (mm) units at the current zoom."""
@@ -668,17 +682,27 @@ class MainWindow(QMainWindow):
     def _on_object_drag(self, handle, dy: float, dz: float) -> None:
         self._selection = handle  # dragging selects
         kind, idx = handle
+        c = self.controller
         if kind == "part":
             if not self._dragging_obj:
-                self.controller.begin_part_move()
+                c.begin_part_move()
+                self._drag_raw = [c.project.offset_y, c.project.offset_z]
                 self._dragging_obj = True
-            c = self.controller
-            self.controller.move_part_to(c.project.offset_y + dy, c.project.offset_z + dz)
+            self._drag_raw[0] += dy
+            self._drag_raw[1] += dz
+            oy, oz, guides, label = self._snap_part(self._drag_raw[0], self._drag_raw[1])
+            self._guides, self._live_label = guides, label
+            c.move_part_to(oy, oz)
         elif kind == "cut":
             if not self._dragging_obj:
-                self.controller.begin_cut_move(idx)
+                c.begin_cut_move(idx)
+                self._drag_raw = [0.0, 0.0]  # accumulated delta
                 self._dragging_obj = True
-            self.controller.move_cut(idx, dy, dz)
+            self._drag_raw[0] += dy
+            self._drag_raw[1] += dz
+            sdy, sdz, guides, label = self._snap_cut(idx, dy, dz)
+            self._guides, self._live_label = guides, label
+            c.move_cut(idx, sdy, sdz)
 
     def _on_object_drag_end(self, handle) -> None:
         kind, idx = handle
@@ -687,6 +711,90 @@ class MainWindow(QMainWindow):
         elif kind == "cut":
             self.controller.end_cut_move(idx)
         self._dragging_obj = False
+        self._drag_raw = None
+        self._guides = []
+        self._live_label = None
+        self._refresh_canvas()
+
+    # ── snapping ──────────────────────────────────────────────────────
+    def _base_bbox(self):
+        segs = self.controller.project.segments
+        if not segs:
+            return None
+        ys = [p for s in segs for p in (s.a.y, s.b.y)]
+        zs = [p for s in segs for p in (s.a.z, s.b.z)]
+        return (min(ys), min(zs), max(ys), max(zs))
+
+    @staticmethod
+    def _snap_axis(features, targets, raw_offset, tol):
+        """Snap so some feature (machine = feature + raw_offset) hits a target."""
+        best = None
+        for f in features:
+            machine = f + raw_offset
+            for t in targets:
+                d = abs(machine - t)
+                if d <= tol and (best is None or d < best[2]):
+                    best = (t - f, t, d)
+        if best is not None:
+            return best[0], best[1]
+        return raw_offset, None
+
+    def _snap_part(self, raw_oy, raw_oz):
+        if not self._snap_enabled:
+            return raw_oy, raw_oz, [], self._part_label(raw_oy, raw_oz)
+        bb = self._base_bbox()
+        if bb is None:
+            return raw_oy, raw_oz, [], None
+        y0, z0, y1, z1 = bb
+        p = self.controller.project
+        tol = self._scene_tolerance(8)
+        oy, gy = self._snap_axis([y0, (y0 + y1) / 2, y1], [0.0, p.area_y_mm, p.area_y_mm / 2], raw_oy, tol)
+        oz, gz = self._snap_axis([z0, (z0 + z1) / 2, z1], [0.0, p.area_z_mm, p.area_z_mm / 2], raw_oz, tol)
+        guides = []
+        if gy is not None:
+            guides.append((1.0, 0.0, -gy))
+        if gz is not None:
+            guides.append((0.0, 1.0, -gz))
+        return oy, oz, guides, self._part_label(oy, oz)
+
+    def _part_label(self, oy, oz):
+        bb = self._base_bbox()
+        if bb is None:
+            return None
+        y0, z0, y1, z1 = bb
+        cy, cz = (y0 + y1) / 2 + oy, (z0 + z1) / 2 + oz
+        return (f"Δ Y {oy:+.1f}   Z {oz:+.1f} mm", cy, cz)
+
+    def _snap_cut(self, idx, dy, dz):
+        c = self.controller
+        cut = c.project.manual_cuts[idx]
+        from ..core.manual_cuts import CutKind
+
+        if not self._snap_enabled or cut.kind not in (CutKind.Y, CutKind.Z):
+            return dy, dz, [], None
+        p = c.project
+        tol = self._scene_tolerance(8)
+        if cut.kind == CutKind.Y:
+            cur = cut.meta.get("y", 0.0) + p.offset_y  # machine position
+            new = cur + dy
+            snapped = self._snap_to_grid(new, [0.0, p.area_y_mm, p.area_y_mm / 2], tol)
+            applied = (snapped - cur)
+            return applied, 0.0, [(1.0, 0.0, -snapped)], (f"Y {snapped:.1f} mm", snapped, p.area_z_mm / 2)
+        cur = cut.meta.get("z", 0.0) + p.offset_z
+        new = cur + dz
+        snapped = self._snap_to_grid(new, [0.0, p.area_z_mm, p.area_z_mm / 2], tol)
+        applied = (snapped - cur)
+        return 0.0, applied, [(0.0, 1.0, -snapped)], (f"Z {snapped:.1f} mm", p.area_y_mm / 2, snapped)
+
+    @staticmethod
+    def _snap_to_grid(value, anchors, tol, grid=5.0):
+        best = value
+        bestd = tol
+        for t in (*anchors, round(value / grid) * grid):
+            d = abs(value - t)
+            if d <= bestd:
+                best, bestd = t, d
+        return best
 
     def _on_canvas_escape(self) -> None:
         if self._measure_a is not None or self._measure_b is not None:
@@ -777,6 +885,8 @@ class MainWindow(QMainWindow):
             measure=measure[0],
             measure_active=measure[1],
             selected=self._selection if not focused else None,
+            guides=list(self._guides),
+            live_label=self._live_label,
         )
         self.scene.render_model(model)
         self._status_segs.setText(f"{len(c.project.segments)} segs")
