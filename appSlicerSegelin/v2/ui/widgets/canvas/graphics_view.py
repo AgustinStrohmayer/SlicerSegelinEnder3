@@ -33,8 +33,11 @@ class CanvasView(QGraphicsView):
         self.setDragMode(QGraphicsView.DragMode.NoDrag)
         self.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
         self.setResizeAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
-        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        # No scrollbars — it's an infinite-canvas feel: drag to pan, wheel to
+        # zoom. The view still keeps a scroll range internally (so programmatic
+        # panning via the scrollbar values keeps working), it's just not shown.
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.setMouseTracking(True)
         self.setFrameShape(QGraphicsView.Shape.NoFrame)
         # Mathematical Y axis (up), as in the legacy app.

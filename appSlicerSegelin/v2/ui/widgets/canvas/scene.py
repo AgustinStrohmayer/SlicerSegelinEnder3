@@ -105,7 +105,8 @@ class SlicerScene(QGraphicsScene):
         content = self.itemsBoundingRect()
         if content.isEmpty():
             content = QRectF(0, 0, model.bed_y, model.bed_z)
-        pad = max(content.width(), content.height(), model.bed_y, model.bed_z, 50.0)
+        # Generous padding so panning feels free (no scrollbars are shown).
+        pad = max(content.width(), content.height(), model.bed_y, model.bed_z, 50.0) * 3.0
         self.setSceneRect(content.adjusted(-pad, -pad, pad, pad))
 
     # ── pieces ────────────────────────────────────────────────────────
