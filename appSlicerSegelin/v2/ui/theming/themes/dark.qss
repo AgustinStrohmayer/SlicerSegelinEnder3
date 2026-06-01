@@ -1,0 +1,638 @@
+/* SlicerSegelinEnder3 — dark theme.
+ * Token references in the form color.NAME / space.NAME (wrapped in
+ * double braces) are substituted by ui/theming/qss.py at load time.
+ * This file is structurally identical to light.qss; the palette
+ * difference lives entirely in tokens.py.
+ */
+
+/* ============== BASE ============== */
+* {
+    font-family: {{typography.family}};
+    font-size: {{typography.size_body}}px;
+    color: {{color.text}};
+    outline: 0;
+}
+
+QMainWindow, QDialog {
+    background-color: {{color.bg}};
+}
+
+/* Default to transparent so nested containers don't double-paint;
+ * every real surface is given an explicit background below. */
+QWidget {
+    background-color: transparent;
+}
+
+QToolTip {
+    background: {{color.surface_alt}};
+    color: {{color.text}};
+    border: 1px solid {{color.border}};
+    border-radius: {{radius.sm}}px;
+    padding: {{space.xs}}px {{space.sm}}px;
+}
+
+/* Dock resize handles between panels and the canvas. */
+QMainWindow::separator {
+    background: {{color.bg}};
+    width: 6px;
+    height: 6px;
+}
+QMainWindow::separator:hover {
+    background: {{color.accent}};
+}
+
+/* ============== TITLE / HEADERS ============== */
+QLabel#TitleLabel {
+    font-size: {{typography.size_title}}px;
+    font-weight: 600;
+    color: {{color.text}};
+}
+
+QLabel#MutedLabel, QLabel[class="muted"] {
+    color: {{color.muted}};
+    font-size: {{typography.size_small}}px;
+}
+
+/* Technical numerals (dimensions, times, coordinates) read better mono. */
+QLabel[role="mono"] {
+    font-family: {{typography.family_mono}};
+    letter-spacing: 0.2px;
+}
+
+/* ============== TOOLBAR ============== */
+QToolBar {
+    background: {{color.surface}};
+    border: none;
+    border-bottom: 1px solid {{color.border}};
+    padding: {{space.sm}}px {{space.md}}px;
+    spacing: {{space.xs}}px;
+}
+
+QToolBar::separator {
+    background: {{color.border}};
+    width: 1px;
+    margin: {{space.xs}}px {{space.sm}}px;
+}
+
+QToolBar QToolButton {
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: {{radius.sm}}px;
+    padding: {{space.sm}}px {{space.sm}}px;
+    color: {{color.text}};
+}
+
+QToolBar QToolButton:hover {
+    background: {{color.elevated}};
+}
+
+QToolBar QToolButton:pressed,
+QToolBar QToolButton:checked {
+    background: {{color.accent_soft}};
+    border-color: {{color.accent}};
+}
+
+/* ============== MENUBAR ============== */
+QMenuBar {
+    background: {{color.surface}};
+    border-bottom: 1px solid {{color.border}};
+    padding: {{space.xs}}px {{space.sm}}px;
+}
+
+QMenuBar::item {
+    background: transparent;
+    padding: {{space.xs}}px {{space.md}}px;
+    border-radius: {{radius.sm}}px;
+}
+
+QMenuBar::item:selected {
+    background: {{color.elevated}};
+}
+
+QMenu {
+    background: {{color.surface}};
+    border: 1px solid {{color.border}};
+    border-radius: {{radius.md}}px;
+    padding: {{space.xs}}px;
+}
+
+QMenu::item {
+    padding: {{space.sm}}px {{space.lg}}px;
+    border-radius: {{radius.sm}}px;
+    color: {{color.text}};
+}
+
+QMenu::item:selected {
+    background: {{color.accent}};
+    color: {{color.on_accent}};
+}
+
+QMenu::separator {
+    height: 1px;
+    background: {{color.border}};
+    margin: {{space.xs}}px {{space.sm}}px;
+}
+
+/* ============== DOCKS ============== */
+QDockWidget {
+    background: {{color.surface}};
+    color: {{color.muted}};
+    titlebar-close-icon: none;
+    titlebar-normal-icon: none;
+}
+
+QDockWidget::title {
+    background: {{color.surface}};
+    padding: {{space.md}}px {{space.lg}}px {{space.sm}}px {{space.lg}}px;
+    border-bottom: 1px solid {{color.border}};
+    color: {{color.muted}};
+    font-size: {{typography.size_small}}px;
+    font-weight: 700;
+}
+
+/* ============== SIDEBAR ============== */
+QScrollArea#Sidebar {
+    background: {{color.surface}};
+    border: none;
+    border-right: 1px solid {{color.border}};
+}
+/* The scroll viewport + its inner container must paint a real surface,
+ * otherwise the dock composites to black on Windows. */
+QScrollArea#Sidebar > QWidget#qt_scrollarea_viewport,
+QWidget#SidebarBody {
+    background: {{color.surface}};
+}
+
+/* Each collapsible group is a card raised off the sidebar. */
+QWidget#SidebarCard {
+    background: {{color.surface_alt}};
+    border: 1px solid {{color.border_strong}};
+    border-radius: {{radius.lg}}px;
+}
+
+QToolButton#SectionHeader {
+    background: transparent;
+    border: none;
+    color: {{color.text}};
+    font-size: {{typography.size_body}}px;
+    font-weight: 700;
+    padding: {{space.md}}px {{space.md}}px;
+    text-align: left;
+}
+QToolButton#SectionHeader:hover {
+    color: {{color.accent}};
+}
+
+QFrame#SectionContent {
+    background: transparent;
+}
+
+/* ============== STATUS BAR ============== */
+QStatusBar {
+    background: {{color.surface}};
+    border-top: 1px solid {{color.border}};
+    color: {{color.muted}};
+    padding: {{space.xs}}px {{space.md}}px;
+}
+
+QStatusBar::item {
+    border: none;
+}
+
+/* ============== BUTTONS ============== */
+QPushButton {
+    background: {{color.elevated}};
+    border: 1px solid {{color.border_strong}};
+    border-radius: {{radius.md}}px;
+    padding: {{space.sm}}px {{space.md}}px;
+    color: {{color.text}};
+    font-weight: 500;
+    min-height: 30px;
+}
+
+QPushButton:hover {
+    border-color: {{color.accent}};
+    color: {{color.accent}};
+}
+
+QPushButton:pressed {
+    background: {{color.accent_soft}};
+}
+
+QPushButton:checked {
+    background: {{color.accent_soft}};
+    border-color: {{color.accent}};
+    color: {{color.accent}};
+    font-weight: 600;
+}
+
+QPushButton:disabled {
+    color: {{color.muted}};
+    background: {{color.surface}};
+    border-color: {{color.border}};
+}
+
+QPushButton[role="primary"] {
+    background: {{color.accent}};
+    border-color: {{color.accent}};
+    color: {{color.on_accent}};
+    font-weight: 600;
+}
+
+QPushButton[role="primary"]:hover {
+    background: {{color.accent_hover}};
+    border-color: {{color.accent_hover}};
+    color: {{color.on_accent}};
+}
+
+QPushButton[role="primary"]:pressed {
+    background: {{color.accent}};
+}
+
+QPushButton[role="danger"] {
+    background: {{color.danger}};
+    border-color: {{color.danger}};
+    color: #FFFFFF;
+}
+
+QPushButton[role="ghost"] {
+    background: transparent;
+    border-color: transparent;
+}
+QPushButton[role="ghost"]:hover {
+    background: {{color.elevated}};
+    color: {{color.text}};
+}
+
+/* ============== INPUTS ============== */
+QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox {
+    background: {{color.bg}};
+    border: 1px solid {{color.border_strong}};
+    border-radius: {{radius.sm}}px;
+    padding: {{space.xs}}px {{space.sm}}px;
+    color: {{color.text}};
+    selection-background-color: {{color.accent}};
+    selection-color: {{color.on_accent}};
+    min-height: 26px;
+}
+
+QLineEdit:hover, QSpinBox:hover, QDoubleSpinBox:hover, QComboBox:hover {
+    border-color: {{color.muted}};
+}
+
+QLineEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus, QComboBox:focus {
+    border-color: {{color.accent}};
+}
+
+QLineEdit[invalid="true"] {
+    border-color: {{color.danger}};
+}
+
+QComboBox::drop-down {
+    border: none;
+    width: 20px;
+}
+
+QComboBox QAbstractItemView {
+    background: {{color.surface}};
+    border: 1px solid {{color.border}};
+    border-radius: {{radius.sm}}px;
+    selection-background-color: {{color.accent}};
+    selection-color: {{color.on_accent}};
+    padding: {{space.xs}}px;
+}
+
+/* ============== CHECKBOX ============== */
+QCheckBox {
+    background: transparent;
+    color: {{color.text}};
+    spacing: {{space.sm}}px;
+    padding: {{space.xs}}px 0;
+}
+
+QCheckBox::indicator {
+    width: 16px;
+    height: 16px;
+    border-radius: {{radius.sm}}px;
+    border: 1px solid {{color.muted}};
+    background: {{color.bg}};
+}
+
+QCheckBox::indicator:hover {
+    border-color: {{color.accent}};
+}
+
+QCheckBox::indicator:checked {
+    background: {{color.accent}};
+    border-color: {{color.accent}};
+}
+
+/* ============== LIST ============== */
+QListWidget {
+    background: {{color.bg}};
+    border: 1px solid {{color.border}};
+    border-radius: {{radius.sm}}px;
+    padding: {{space.xs}}px;
+    outline: 0;
+}
+
+QListWidget::item {
+    padding: {{space.xs}}px {{space.sm}}px;
+    border-radius: {{radius.sm}}px;
+    color: {{color.text}};
+}
+
+QListWidget::item:hover {
+    background: {{color.elevated}};
+}
+
+QListWidget::item:selected {
+    background: {{color.accent}};
+    color: {{color.on_accent}};
+}
+
+/* ============== SLIDERS ============== */
+QSlider::groove:horizontal {
+    height: 5px;
+    background: {{color.border_strong}};
+    border-radius: 3px;
+}
+
+QSlider::handle:horizontal {
+    background: {{color.surface}};
+    border: 2px solid {{color.accent}};
+    width: 14px;
+    height: 14px;
+    margin: -6px 0;
+    border-radius: 9px;
+}
+
+QSlider::handle:horizontal:hover {
+    border-color: {{color.accent_hover}};
+}
+
+QSlider::sub-page:horizontal {
+    background: {{color.accent}};
+    border-radius: 3px;
+}
+
+/* ============== SCROLLBARS ============== */
+QScrollBar:vertical {
+    background: transparent;
+    width: 11px;
+    margin: 2px;
+}
+
+QScrollBar::handle:vertical {
+    background: {{color.border_strong}};
+    border-radius: 4px;
+    min-height: 24px;
+}
+
+QScrollBar::handle:vertical:hover {
+    background: {{color.muted}};
+}
+
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+    height: 0;
+}
+QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
+    background: transparent;
+}
+
+QScrollBar:horizontal {
+    background: transparent;
+    height: 11px;
+    margin: 2px;
+}
+
+QScrollBar::handle:horizontal {
+    background: {{color.border_strong}};
+    border-radius: 4px;
+    min-width: 24px;
+}
+
+QScrollBar::handle:horizontal:hover {
+    background: {{color.muted}};
+}
+
+QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
+    width: 0;
+}
+QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {
+    background: transparent;
+}
+
+/* ============== CANVAS ============== */
+QWidget#CanvasContainer {
+    background: {{color.bg}};
+}
+
+QGraphicsView {
+    background: {{color.bg}};
+    border: none;
+}
+
+/* Rulers + the corner square between them. */
+QWidget#Ruler {
+    background: {{color.surface}};
+    border-right: 1px solid {{color.border}};
+    border-bottom: 1px solid {{color.border}};
+}
+
+/* Floating canvas controls (zoom in/out, fit, reset). */
+QFrame#FloatingControls {
+    background: {{color.surface}};
+    border: 1px solid {{color.border}};
+    border-radius: {{radius.md}}px;
+}
+
+QToolButton#CanvasFloatBtn {
+    background: transparent;
+    border: none;
+    border-radius: {{radius.sm}}px;
+    padding: 5px;
+    color: {{color.text}};
+}
+QToolButton#CanvasFloatBtn:hover {
+    background: {{color.elevated}};
+    color: {{color.accent}};
+}
+
+QLabel#CoordReadout {
+    background: {{color.surface}};
+    border: 1px solid {{color.border}};
+    border-radius: {{radius.sm}}px;
+    padding: 4px 10px;
+    color: {{color.muted}};
+    font-family: {{typography.family_mono}};
+    font-size: {{typography.size_small}}px;
+}
+
+QLabel#ZoomBadge {
+    background: {{color.surface}};
+    border: 1px solid {{color.border}};
+    border-radius: {{radius.sm}}px;
+    padding: 4px 10px;
+    color: {{color.muted}};
+    font-family: {{typography.family_mono}};
+    font-size: {{typography.size_small}}px;
+}
+QLabel#ZoomBadge:hover {
+    color: {{color.accent}};
+    border-color: {{color.accent}};
+}
+
+/* Status-bar permanent readouts. */
+QStatusBar QLabel {
+    color: {{color.muted}};
+    padding: 0 {{space.sm}}px;
+}
+QStatusBar QLabel[role="mono"] {
+    font-family: {{typography.family_mono}};
+    color: {{color.text}};
+}
+
+/* ============== PARTS GRID ============== */
+QScrollArea#PartsGrid {
+    background: {{color.bg}};
+    border: none;
+    border-left: 1px solid {{color.border}};
+}
+QScrollArea#PartsGrid > QWidget#qt_scrollarea_viewport,
+QWidget#PartsGridBody {
+    background: {{color.bg}};
+}
+
+QFrame#PartTile {
+    background: {{color.surface}};
+    border: 1px solid {{color.border}};
+    border-radius: {{radius.md}}px;
+}
+QFrame#PartTile:hover {
+    border-color: {{color.border_strong}};
+}
+QFrame#PartTile[selected="true"] {
+    border: 2px solid {{color.accent}};
+}
+QFrame#PartTile QLabel[role="title"] {
+    font-size: {{typography.size_body}}px;
+    font-weight: 600;
+    color: {{color.text}};
+}
+
+/* ============== TIMELINE ============== */
+QWidget#Timeline {
+    background: {{color.surface}};
+    border-top: 1px solid {{color.border}};
+}
+
+/* Loop toggle (QToolButton) in the transport row. */
+QWidget#Timeline QToolButton {
+    background: {{color.elevated}};
+    border: 1px solid {{color.border_strong}};
+    border-radius: {{radius.sm}}px;
+    color: {{color.text}};
+}
+QWidget#Timeline QToolButton:hover {
+    border-color: {{color.accent}};
+    color: {{color.accent}};
+}
+QWidget#Timeline QToolButton:checked {
+    background: {{color.accent_soft}};
+    border-color: {{color.accent}};
+    color: {{color.accent}};
+}
+
+/* ============== TOAST ============== */
+/* A solid card on its own surface with a strong border so it clearly reads
+ * as a floating notification over the canvas (not see-through). */
+QFrame#Toast {
+    background: {{color.surface}};
+    border: 1px solid {{color.border_strong}};
+    border-left: 3px solid {{color.accent}};
+    border-radius: {{radius.md}}px;
+    padding: {{space.md}}px {{space.lg}}px;
+}
+
+QFrame#Toast[severity="success"] { border-left: 3px solid {{color.success}}; }
+QFrame#Toast[severity="warning"] { border-left: 3px solid {{color.warning}}; }
+QFrame#Toast[severity="danger"]  { border-left: 3px solid {{color.danger}};  }
+QFrame#Toast[severity="info"]    { border-left: 3px solid {{color.accent}};  }
+QFrame#Toast QLabel { background: transparent; }
+
+/* ============== COMMAND PALETTE ============== */
+QFrame#CommandPalette {
+    background: {{color.surface}};
+    border: 1px solid {{color.border}};
+    border-radius: {{radius.lg}}px;
+}
+
+QFrame#CommandPalette QLineEdit {
+    background: transparent;
+    border: none;
+    border-bottom: 1px solid {{color.border}};
+    border-radius: 0;
+    padding: {{space.md}}px {{space.lg}}px;
+    font-size: {{typography.size_title}}px;
+}
+
+QFrame#CommandPalette QListView {
+    background: transparent;
+    border: none;
+    padding: {{space.xs}}px;
+}
+
+QFrame#CommandPalette QListView::item {
+    padding: {{space.sm}}px {{space.md}}px;
+    border-radius: {{radius.sm}}px;
+}
+
+QFrame#CommandPalette QListView::item:selected {
+    background: {{color.accent}};
+    color: {{color.on_accent}};
+}
+
+/* ============== SHORTCUTS OVERLAY ============== */
+QWidget#OverlayBackdrop {
+    background: rgba(0, 0, 0, 0.45);
+}
+
+QFrame#ShortcutsOverlay {
+    background: {{color.surface}};
+    border: 1px solid {{color.border}};
+    border-radius: {{radius.lg}}px;
+}
+
+QFrame#ShortcutsOverlay QScrollArea,
+QFrame#ShortcutsOverlay QScrollArea > QWidget > QWidget {
+    background: transparent;
+    border: none;
+}
+
+QLabel[role="title"] {
+    font-size: {{typography.size_title}}px;
+    font-weight: 700;
+    color: {{color.text}};
+}
+
+QLabel[role="body"] {
+    color: {{color.text}};
+}
+
+QLabel[role="kbd"] {
+    background: {{color.surface_alt}};
+    border: 1px solid {{color.border_strong}};
+    border-radius: {{radius.sm}}px;
+    padding: 2px 8px;
+    color: {{color.muted}};
+    font-family: {{typography.family_mono}};
+    font-size: {{typography.size_small}}px;
+}
+
+QLabel#FieldLabel {
+    color: {{color.muted}};
+    font-size: {{typography.size_small}}px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+}
