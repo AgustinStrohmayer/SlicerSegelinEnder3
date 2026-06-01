@@ -22,6 +22,8 @@ class CanvasView(QGraphicsView):
     cursorMoved = pyqtSignal(float, float)
     transformChanged = pyqtSignal()
     escapePressed = pyqtSignal()
+    nudge = pyqtSignal(float, float)      # (dy, dz) mm for the selected element
+    deleteSelection = pyqtSignal()
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -77,6 +79,22 @@ class CanvasView(QGraphicsView):
             return
         if event.key() == Qt.Key.Key_Escape:
             self.escapePressed.emit()
+            event.accept()
+            return
+        if event.key() in (Qt.Key.Key_Delete, Qt.Key.Key_Backspace):
+            self.deleteSelection.emit()
+            event.accept()
+            return
+        arrows = {
+            Qt.Key.Key_Left: (-1.0, 0.0), Qt.Key.Key_Right: (1.0, 0.0),
+            Qt.Key.Key_Up: (0.0, 1.0), Qt.Key.Key_Down: (0.0, -1.0),
+        }
+        if event.key() in arrows:
+            mods = event.modifiers()
+            step = 10.0 if (mods & Qt.KeyboardModifier.ControlModifier) else (
+                0.1 if (mods & Qt.KeyboardModifier.ShiftModifier) else 1.0)
+            ux, uz = arrows[event.key()]
+            self.nudge.emit(ux * step, uz * step)
             event.accept()
             return
         super().keyPressEvent(event)

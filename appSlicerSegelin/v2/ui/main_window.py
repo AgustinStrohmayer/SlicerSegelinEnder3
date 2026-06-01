@@ -64,7 +64,10 @@ class MainWindow(QMainWindow):
         self.view.hit_test = self._canvas_hit_test
         self.view.on_object_drag = self._on_object_drag
         self.view.on_object_drag_end = self._on_object_drag_end
+        self.view.nudge.connect(self._nudge_selection)
+        self.view.deleteSelection.connect(self._delete_selection)
         self._dragging_obj = False
+        self._selection = None  # ("part", None) | ("cut", i) | None
 
         # Parts gallery sits beside the canvas in a splitter; toggling each
         # side's visibility gives the single / grid / split view modes.
@@ -548,6 +551,10 @@ class MainWindow(QMainWindow):
             self._on_measure_click(scene_y, scene_z)
             return
         if not self._picking_diagonal:
+            from PyQt6.QtCore import QPointF
+
+            self._selection = self._canvas_hit_test(QPointF(scene_y, scene_z))
+            self._refresh_canvas()
             return
         # canvas coords are machine coords → convert to base for the cut
         base = Point(scene_y - self.controller.project.offset_y, scene_z - self.controller.project.offset_z)
@@ -637,7 +644,29 @@ class MainWindow(QMainWindow):
                 return ("part", None)
         return None
 
+    def _nudge_selection(self, dy: float, dz: float) -> None:
+        sel = self._selection
+        c = self.controller
+        if sel is None or not c.has_geometry:
+            return
+        if sel[0] == "part":
+            c.begin_part_move()
+            c.move_part_to(c.project.offset_y + dy, c.project.offset_z + dz)
+            c.end_part_move()
+        elif sel[0] == "cut":
+            c.begin_cut_move(sel[1])
+            c.move_cut(sel[1], dy, dz)
+            c.end_cut_move(sel[1])
+
+    def _delete_selection(self) -> None:
+        sel = self._selection
+        if sel is not None and sel[0] == "cut":
+            self.controller.delete_manual_cut(sel[1])
+            self._selection = None
+            self._refresh_canvas()
+
     def _on_object_drag(self, handle, dy: float, dz: float) -> None:
+        self._selection = handle  # dragging selects
         kind, idx = handle
         if kind == "part":
             if not self._dragging_obj:
@@ -747,6 +776,7 @@ class MainWindow(QMainWindow):
             show_dims=self._show_dims,
             measure=measure[0],
             measure_active=measure[1],
+            selected=self._selection if not focused else None,
         )
         self.scene.render_model(model)
         self._status_segs.setText(f"{len(c.project.segments)} segs")

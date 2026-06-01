@@ -34,6 +34,8 @@ class ScenePalette:
     measure: str = "#22D3EE"   # cyan — reads as "measurement", distinct from the cut colour
     dim_line: str = "#8A93A6"  # dimension witness/arrow lines
     dim_text: str = "#E6E8EE"  # dimension labels
+    select: str = "#3B82F6"    # selection highlight + handles
+    guide: str = "#22D3EE"     # snap guide lines
 
 
 _KIND_COLOR = {
@@ -61,6 +63,10 @@ class SceneModel:
     show_dims: bool = False                       # overlay the part's W×H
     measure: tuple[Point, Point] | None = None    # (a, b) of the measure tool
     measure_active: bool = False                  # True while picking the 2nd point
+    selected: tuple | None = None                 # ("part",) | ("cut", i) | ("part", "handles")
+    handles: bool = False                         # draw rotate/scale handles on the part
+    guides: list[tuple[float, float, float]] = field(default_factory=list)  # snap guides a·y+b·z+c=0
+    live_label: tuple[str, float, float] | None = None  # (text, y, z) shown near the cursor
 
 
 class SlicerScene(QGraphicsScene):
@@ -92,9 +98,86 @@ class SlicerScene(QGraphicsScene):
             self._draw_entry(model.entry_point)
         if model.show_dims and model.segments:
             self._draw_dims(model)
+        if model.guides:
+            self._draw_guides(model)
+        if model.selected is not None:
+            self._draw_selection(model)
         if model.measure is not None:
             self._draw_measure(model)
+        if model.live_label is not None:
+            txt, lx, lz = model.live_label
+            self._add_label(txt, lx, lz, self.palette.select)
         self._update_scene_rect(model)
+
+    # ── selection + guides + handles ──────────────────────────────────
+    def _part_bbox(self, model: SceneModel):
+        if not model.segments:
+            return None
+        ys = [p for s in model.segments for p in (s.a.y, s.b.y)]
+        zs = [p for s in model.segments for p in (s.a.z, s.b.z)]
+        return (min(ys), min(zs), max(ys), max(zs))
+
+    def _full_line(self, model: SceneModel, a: float, b: float, c: float) -> QLineF:
+        diag = max(model.bed_y, model.bed_z) * 4
+        if abs(b) > abs(a):
+            y0, y1 = -diag, diag
+            z0 = (-c - a * y0) / b
+            z1 = (-c - a * y1) / b
+        else:
+            z0, z1 = -diag, diag
+            y0 = (-c - b * z0) / a if abs(a) > 1e-12 else 0.0
+            y1 = (-c - b * z1) / a if abs(a) > 1e-12 else 0.0
+        return QLineF(y0, z0, y1, z1)
+
+    def _draw_guides(self, model: SceneModel) -> None:
+        pen = QPen(QColor(self.palette.guide), 0, Qt.PenStyle.DashLine)
+        pen.setCosmetic(True)
+        pen.setWidthF(1.0)
+        for a, b, c in model.guides:
+            self.addLine(self._full_line(model, a, b, c), pen).setZValue(13)
+
+    def _draw_selection(self, model: SceneModel) -> None:
+        col = QColor(self.palette.select)
+        if model.selected[0] == "part":
+            bb = self._part_bbox(model)
+            if bb is None:
+                return
+            y0, z0, y1, z1 = bb
+            pad = max(y1 - y0, z1 - z0) * 0.03 + 1.0
+            pen = QPen(col, 0, Qt.PenStyle.DashLine)
+            pen.setCosmetic(True)
+            pen.setWidthF(1.4)
+            rect = QRectF(y0 - pad, z0 - pad, (y1 - y0) + 2 * pad, (z1 - z0) + 2 * pad)
+            self.addRect(rect, pen).setZValue(12)
+            if model.handles:
+                self._draw_handles(rect)
+        elif model.selected[0] == "cut":
+            i = model.selected[1]
+            if 0 <= i < len(model.manual_lines):
+                pen = QPen(col, 0)
+                pen.setCosmetic(True)
+                pen.setWidthF(2.6)
+                self.addLine(self._full_line(model, *model.manual_lines[i]), pen).setZValue(12)
+
+    def _draw_handles(self, rect: QRectF) -> None:
+        col = QColor(self.palette.select)
+        pen = QPen(col, 0)
+        pen.setCosmetic(True)
+        brush = QBrush(QColor("#FFFFFF"))
+        r = 3.0  # scene units; cosmetic-ish (small)
+        corners = [
+            (rect.left(), rect.top()), (rect.right(), rect.top()),
+            (rect.left(), rect.bottom()), (rect.right(), rect.bottom()),
+        ]
+        for cx, cz in corners:
+            item = self.addEllipse(QRectF(cx - r, cz - r, 2 * r, 2 * r), pen, brush)
+            item.setZValue(13)
+        # Rotate handle: a dot above the top edge centre.
+        hx = (rect.left() + rect.right()) / 2
+        hz = rect.bottom() + (rect.height() * 0.12 + 4.0)  # bottom is +z (up) after flip
+        self.addLine(QLineF(hx, rect.bottom(), hx, hz), pen).setZValue(12)
+        item = self.addEllipse(QRectF(hx - r, hz - r, 2 * r, 2 * r), pen, QBrush(col))
+        item.setZValue(13)
 
     def _update_scene_rect(self, model: SceneModel) -> None:
         """Pad the scene around the content so the view can pan freely.
