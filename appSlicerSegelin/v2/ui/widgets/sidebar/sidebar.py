@@ -65,6 +65,7 @@ class Sidebar(QScrollArea):
     export_batch_requested = pyqtSignal()
     export_part_requested = pyqtSignal(int)
     diagonal_requested = pyqtSignal()
+    place_cut_requested = pyqtSignal(str)  # "y" | "z"
 
     def __init__(self, controller: ProjectController, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -260,8 +261,16 @@ class Sidebar(QScrollArea):
         b_z.clicked.connect(self._on_add_z)
         s.add_layout(_row(QLabel("Z"), self.in_cut_z, b_z))
         b_diag = QPushButton("Diagonal cut (2 clicks)")
+        b_diag.setToolTip("Click two points on the canvas to define a diagonal cut")
         b_diag.clicked.connect(self.diagonal_requested.emit)
         s.add(b_diag)
+        b_py = QPushButton("Place Y on canvas")
+        b_py.setToolTip("Click on the canvas to drop a Y cut where you point")
+        b_py.clicked.connect(lambda: self.place_cut_requested.emit("y"))
+        b_pz = QPushButton("Place Z on canvas")
+        b_pz.setToolTip("Click on the canvas to drop a Z cut where you point")
+        b_pz.clicked.connect(lambda: self.place_cut_requested.emit("z"))
+        s.add_layout(_row(b_py, b_pz))
         self.list_cuts = QListWidget()
         self.list_cuts.setMaximumHeight(110)
         s.add(self.list_cuts)

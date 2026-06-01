@@ -74,6 +74,7 @@ class MainWindow(QMainWindow):
         self._live_label = None        # (text, y, z) shown near the cursor
         self._cursor = (0.0, 0.0)      # last cursor position in scene coords
         self._tf_ref = None            # rotate/scale drag reference (angle/dist)
+        self._place_cut_mode = None    # "y" | "z" while placing cuts by click
 
         # Parts gallery sits beside the canvas in a splitter; toggling each
         # side's visibility gives the single / grid / split view modes.
@@ -163,6 +164,7 @@ class MainWindow(QMainWindow):
         self.sidebar.export_batch_requested.connect(self._on_export_batch)
         self.sidebar.export_part_requested.connect(self._on_export_part)
         self.sidebar.diagonal_requested.connect(self._start_diagonal_pick)
+        self.sidebar.place_cut_requested.connect(self._start_place_cut)
         dock = QDockWidget("Workspace", self)
         dock.setObjectName("SidebarDock")
         dock.setWidget(self.sidebar)
@@ -558,9 +560,28 @@ class MainWindow(QMainWindow):
             return
         self._picking_diagonal = True
         self._diag_first = None
+        self._place_cut_mode = None
+        self._measure_mode = False
+        self._measure_action.setChecked(False)
         self.sidebar.set_diagonal_status("Diagonal: click P1 on the canvas")
 
+    def _start_place_cut(self, kind: str) -> None:
+        self._place_cut_mode = kind
+        self._measure_mode = False
+        self._measure_action.setChecked(False)
+        self._picking_diagonal = False
+        self.sidebar.chk_manual.setChecked(True)  # cuts must be enabled to matter
+        self.view.viewport().setCursor(Qt.CursorShape.CrossCursor)
+        self.statusBar().showMessage(f"Click on the canvas to place {kind.upper()} cuts (Esc to finish)", 5000)
+
     def _on_canvas_click(self, scene_y: float, scene_z: float) -> None:
+        if self._place_cut_mode:
+            c = self.controller
+            if self._place_cut_mode == "y":
+                c.add_manual_y(scene_y - c.project.offset_y)
+            else:
+                c.add_manual_z(scene_z - c.project.offset_z)
+            return
         if self._measure_mode:
             self._on_measure_click(scene_y, scene_z)
             return
@@ -613,6 +634,7 @@ class MainWindow(QMainWindow):
         self._measure_mode = on
         if on:
             self._picking_diagonal = False  # mutually exclusive
+            self._place_cut_mode = None
             self.statusBar().showMessage("Measure: click two points (Esc clears)", 4000)
         else:
             self._measure_a = self._measure_b = self._measure_cursor = None
@@ -637,7 +659,7 @@ class MainWindow(QMainWindow):
     def _canvas_hit_test(self, scene_pt):
         """Return ('cut', i) | ('part', None) | None for the point under the cursor."""
         c = self.controller
-        if self._measure_mode or self._picking_diagonal or not c.has_geometry:
+        if self._measure_mode or self._picking_diagonal or self._place_cut_mode or not c.has_geometry:
             return None
         if c.focused_layer != -1:  # only manipulate in the full view
             return None
@@ -847,6 +869,11 @@ class MainWindow(QMainWindow):
         return best
 
     def _on_canvas_escape(self) -> None:
+        if self._place_cut_mode is not None:
+            self._place_cut_mode = None
+            self.view.viewport().unsetCursor()
+            self.statusBar().showMessage("Placement finished", 1500)
+            return
         if self._measure_a is not None or self._measure_b is not None:
             self._measure_a = self._measure_b = self._measure_cursor = None
             self._refresh_canvas()
