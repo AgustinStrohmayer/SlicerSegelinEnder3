@@ -102,7 +102,7 @@ class Sidebar(QScrollArea):
     # ── 1. File ───────────────────────────────────────────────────────
     def _section_file(self) -> CollapsibleSection:
         s = CollapsibleSection("1 · Load DXF")
-        load = _primary(QPushButton(get_icon("folder-open", "#FFFFFF"), "  Load DXF"))
+        load = _primary(QPushButton(get_icon("folder-open", "#18181B"), "  Load DXF"))
         load.setToolTip("Import a DXF outline to cut (Ctrl+O)")
         load.clicked.connect(self._on_import)
         s.add(load)
@@ -457,7 +457,7 @@ class Sidebar(QScrollArea):
     # ── 7. Export ─────────────────────────────────────────────────────
     def _section_export(self) -> CollapsibleSection:
         s = CollapsibleSection("7 · Export")
-        b_g = _primary(QPushButton(get_icon("save", "#FFFFFF"), "  Generate G-Code"))
+        b_g = _primary(QPushButton(get_icon("save", "#18181B"), "  Generate G-Code"))
         b_g.setToolTip("Export machine-ready G-code for the current profile (Ctrl+E)")
         b_g.clicked.connect(self.export_gcode_requested.emit)
         s.add(b_g)

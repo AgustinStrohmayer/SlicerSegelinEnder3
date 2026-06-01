@@ -113,7 +113,7 @@ class EmptyState(QFrame):
         row = QHBoxLayout()
         row.setSpacing(8)
         row.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        b_import = QPushButton(get_icon("folder-open", "#FFFFFF"), "  Import DXF")
+        b_import = QPushButton(get_icon("folder-open", "#18181B"), "  Import DXF")
         b_import.setProperty("role", "primary")
         b_import.setProperty("size", "lg")
         b_import.clicked.connect(self.import_requested.emit)

@@ -51,7 +51,7 @@ class Timeline(QWidget):
         row1 = QHBoxLayout()
         row1.setSpacing(8)
 
-        self.btn_play = QPushButton(get_icon("play", "#FFFFFF"), "")
+        self.btn_play = QPushButton(get_icon("play", "#18181B"), "")
         self.btn_play.setCheckable(True)
         self.btn_play.setIconSize(QSize(18, 18))
         self.btn_play.setProperty("role", "primary")
@@ -103,13 +103,13 @@ class Timeline(QWidget):
 
     # ── public ────────────────────────────────────────────────────────
     def _on_play(self, checked: bool) -> None:
-        self.btn_play.setIcon(get_icon("pause" if checked else "play", "#FFFFFF"))
+        self.btn_play.setIcon(get_icon("pause" if checked else "play", "#18181B"))
         self.play_toggled.emit(checked)
 
     def set_play_state(self, playing: bool) -> None:
         self.btn_play.blockSignals(True)
         self.btn_play.setChecked(playing)
-        self.btn_play.setIcon(get_icon("pause" if playing else "play", "#FFFFFF"))
+        self.btn_play.setIcon(get_icon("pause" if playing else "play", "#18181B"))
         self.btn_play.blockSignals(False)
 
     def set_progress_fraction(self, fraction: float) -> None:

@@ -77,26 +77,27 @@ class Tokens:
     typography: TypeTokens = field(default_factory=TypeTokens)
 
 
-# Palette: Slate neutral ramp + Indigo accent — a calm, high-contrast,
-# professional pairing (Linear / Vercel / Tailwind-docs lineage). Text and
-# muted tones meet WCAG AA on their intended surfaces.
+# Palette: warm Graphite neutral ramp + Amber accent — an industrial,
+# machine-shop feel (Fusion 360 / Bambu Studio lineage). Amber is a *light*
+# accent, so text/icons sitting on top of it use the dark ``on_accent`` tone
+# for contrast (white-on-amber fails WCAG). Neutrals carry a subtle warm tint.
 DARK = Tokens(
     name="dark",
     color=ColorTokens(
-        bg="#0A0E16",          # app canvas — deep slate
-        surface="#121826",     # panels: toolbar, sidebar, menus
-        surface_alt="#1B2335",  # cards, tiles (clearly raised off the panel)
-        elevated="#27324A",    # buttons / hover fills
-        border="#28324A",      # hairline separators
-        border_strong="#3C4A66",  # input outlines, card edges
-        text="#F1F5F9",        # slate-100
-        muted="#94A3B8",       # slate-400 — secondary text
-        accent="#6366F1",      # indigo-500
-        accent_hover="#818CF8",  # indigo-400
-        accent_soft="#1E1B4B",  # indigo-950 — selection / pressed fills
-        on_accent="#FFFFFF",
+        bg="#15171C",          # app canvas — warm graphite
+        surface="#1E2127",     # panels: toolbar, sidebar, menus
+        surface_alt="#262A33",  # cards, tiles (clearly raised off the panel)
+        elevated="#323843",    # buttons / hover fills
+        border="#2F343E",      # hairline separators
+        border_strong="#454C59",  # input outlines, card edges
+        text="#ECEDEF",
+        muted="#9DA3AE",       # secondary text — AA on panels
+        accent="#F59E0B",      # amber-500
+        accent_hover="#FBBF24",  # amber-400
+        accent_soft="#2C2412",  # deep amber-tinted fill (selection/pressed)
+        on_accent="#18181B",   # dark text/icons on the amber fill
         success="#22C55E",
-        warning="#F59E0B",
+        warning="#FB923C",     # orange — distinct from the amber accent
         danger="#F05252",
     ),
 )
@@ -104,20 +105,20 @@ DARK = Tokens(
 LIGHT = Tokens(
     name="light",
     color=ColorTokens(
-        bg="#EBEEF4",          # app canvas — cool slate-100/200
+        bg="#F3F2EF",          # app canvas — warm off-white
         surface="#FFFFFF",     # panels
-        surface_alt="#F1F5F9",  # slate-100 cards / inputs
-        elevated="#FFFFFF",    # buttons (white, raised on slate panels)
-        border="#E2E8F0",      # slate-200
-        border_strong="#CBD5E1",  # slate-300
-        text="#0F172A",        # slate-900 — strong contrast
-        muted="#475569",       # slate-600 — readable secondary
-        accent="#4F46E5",      # indigo-600
-        accent_hover="#4338CA",  # indigo-700
-        accent_soft="#E0E7FF",  # indigo-100
-        on_accent="#FFFFFF",
+        surface_alt="#F2F0EB",  # warm light cards / inputs
+        elevated="#FFFFFF",    # buttons (white, raised on warm panels)
+        border="#E7E4DD",      # warm hairline
+        border_strong="#D6D2C8",
+        text="#1A1A18",        # near-black, warm
+        muted="#6B6860",       # readable warm secondary (~AA)
+        accent="#D97706",      # amber-600 — readable on white
+        accent_hover="#B45309",  # amber-700
+        accent_soft="#FEF3C7",  # amber-100
+        on_accent="#18181B",   # dark text/icons on the amber fill
         success="#16A34A",
-        warning="#D97706",
+        warning="#EA580C",     # orange — distinct from accent
         danger="#DC2626",
     ),
 )
