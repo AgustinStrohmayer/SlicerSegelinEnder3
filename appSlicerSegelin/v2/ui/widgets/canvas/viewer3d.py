@@ -148,12 +148,12 @@ class Viewer3D(QWidget):
         grid.setSize(BED, BED)
         grid.setSpacing(20, 20)
         grid.translate(BED / 2, BED / 2, 0.5)
-        gr, gg, gb, _ = _hex_rgba(c.border_strong)
-        grid.setColor((gr, gg, gb, 0.9))
+        gr, gg, gb, _ = _hex_rgba(c.muted)
+        grid.setColor((gr, gg, gb, 0.8))
         self._add(grid)
 
         # Stylised Ender-3 frame (2020 extrusions) behind the bed.
-        frame = _hex_rgba(c.border_strong, 1.0)
+        frame = _hex_rgba(c.muted, 1.0)
         s = 12.0  # extrusion thickness
         # base rails
         self._box(-s, -s, -8, BED + s, 0, 2, frame)
@@ -171,7 +171,7 @@ class Viewer3D(QWidget):
         self._box(0, yf0, 0, self._area_y, yf1, self._area_z, foam, gl_opts="translucent")
         # foam wireframe edges for definition
         edges = gl.GLBoxItem(size=QVector3D(self._area_y, self._depth, self._area_z),
-                             color=_pg_color(c.border_strong))
+                             color=_pg_color(c.muted))
         edges.translate(0, yf0, 0)
         self._add(edges)
 

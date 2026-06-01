@@ -7,6 +7,7 @@ the canvas/sidebar refresh consistently via Qt signals.
 from __future__ import annotations
 
 import math
+import os
 
 from PyQt6.QtCore import QObject, pyqtSignal
 
@@ -564,7 +565,7 @@ class ProjectController(QObject):
         except SlicerError as exc:
             self.notify.emit("Save failed", str(exc), "danger")
             return False
-        self.notify.emit("Project saved", str(out), "success")
+        self.notify.emit("Project saved", os.path.basename(str(out)), "success")
         return True
 
     def open_project_archive(self, path: str) -> bool:
@@ -596,7 +597,7 @@ class ProjectController(QObject):
         except OSError as exc:
             self.notify.emit("Export failed", str(exc), "danger")
             return False
-        self.notify.emit("G-code exported", path, "success")
+        self.notify.emit("G-code exported", os.path.basename(path), "success")
         return True
 
     def export_layers_gcode(self, folder: str) -> int:
@@ -627,7 +628,7 @@ class ProjectController(QObject):
         except OSError as exc:
             self.notify.emit("Batch export failed", str(exc), "danger")
             return 0
-        self.notify.emit("Batch exported", f"{total} files → {folder}", "success")
+        self.notify.emit("Batch exported", f"{total} files → {os.path.basename(folder.rstrip(chr(92)+chr(47))) or folder}", "success")
         return total
 
     def export_part_gcode(self, index: int, path: str) -> bool:
@@ -644,7 +645,7 @@ class ProjectController(QObject):
         except OSError as exc:
             self.notify.emit("Export failed", str(exc), "danger")
             return False
-        self.notify.emit("Part exported", f"{self.part_label(index)} → {path}", "success")
+        self.notify.emit("Part exported", f"{self.part_label(index)} → {os.path.basename(path)}", "success")
         return True
 
     def export_dxf(self, path: str) -> bool:
@@ -659,5 +660,5 @@ class ProjectController(QObject):
         except SlicerError as exc:
             self.notify.emit("DXF export failed", str(exc), "danger")
             return False
-        self.notify.emit("DXF exported", f"{written} segments → {path}", "success")
+        self.notify.emit("DXF exported", f"{written} segments → {os.path.basename(path)}", "success")
         return True

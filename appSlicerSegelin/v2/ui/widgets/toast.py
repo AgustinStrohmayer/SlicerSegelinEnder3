@@ -74,6 +74,7 @@ class _Toast(QFrame):
         self.setProperty("severity", severity)
         self.setFrameShape(QFrame.Shape.StyledPanel)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setMaximumWidth(336)  # stay within the 360px host, never off-window
 
         outer = QHBoxLayout(self)
         outer.setContentsMargins(12, 8, 12, 8)
