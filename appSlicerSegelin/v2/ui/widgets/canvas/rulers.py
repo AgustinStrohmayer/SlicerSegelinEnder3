@@ -156,9 +156,14 @@ class _Ruler(QWidget):
             painter.setPen(self._text_color)
             label = _format_mm(y, major)
             painter.save()
-            painter.translate(w - 10, wy + 24)
+            # Rotated label centred in the ruler width and along the tick.
+            # After rotate(-90) the rect's height maps to the ruler's X span,
+            # so it must be <= RULER_THICKNESS or the digits get clipped.
+            band = RULER_THICKNESS - 4
+            length = 54
+            painter.translate((RULER_THICKNESS - band) / 2, wy + length / 2)
             painter.rotate(-90)
-            painter.drawText(QRect(0, 0, 60, RULER_THICKNESS - 2), Qt.AlignmentFlag.AlignVCenter, label)
+            painter.drawText(QRect(0, 0, length, band), Qt.AlignmentFlag.AlignCenter, label)
             painter.restore()
             painter.setPen(major_pen)
             y += major

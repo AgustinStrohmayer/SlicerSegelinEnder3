@@ -36,6 +36,7 @@ class ShortcutsOverlay(QWidget):
 
         self._card = QFrame(self)
         self._card.setObjectName("ShortcutsOverlay")
+        self._card.setMinimumWidth(560)  # don't collapse — keeps the kbd chips from clipping
         self._card.setMaximumWidth(720)
         wrap.addWidget(self._card, alignment=Qt.AlignmentFlag.AlignCenter)
 
