@@ -127,9 +127,11 @@ class CanvasView(QGraphicsView):
             dy = scene_pt.x() - self._drag_last.x()
             dz = scene_pt.y() - self._drag_last.y()
             self._drag_last = scene_pt
+            # Emit the absolute cursor first so handlers that need it (rotate/
+            # scale handles) see the current position.
+            self.cursorMoved.emit(scene_pt.x(), scene_pt.y())
             if self.on_object_drag is not None:
                 self.on_object_drag(self._drag_handle, dy, dz)
-            self.cursorMoved.emit(scene_pt.x(), scene_pt.y())
             return
         if self._pan_active:
             delta = pos - self._pan_last

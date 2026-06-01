@@ -298,6 +298,53 @@ class ProjectController(QObject):
 
         self.history.push(FunctionCommand("Move cut", do, undo), execute=False)
 
+    def begin_transform_drag(self) -> None:
+        self._tf_snapshot = list(self.project.segments)
+
+    def rotate_drag(self, total_deg: float) -> None:
+        snap = getattr(self, "_tf_snapshot", None)
+        if not snap:
+            return
+        try:
+            self.project.segments = transforms.rotate_around_center(snap, total_deg)
+        except SlicerError:
+            return
+        self._invalidate_layers()
+        self.changed.emit()
+        self.info_changed.emit()
+
+    def scale_drag(self, factor: float) -> None:
+        snap = getattr(self, "_tf_snapshot", None)
+        if not snap:
+            return
+        self.project.segments = transforms.scale_around_center(snap, max(0.05, factor))
+        self._invalidate_layers()
+        self.changed.emit()
+        self.info_changed.emit()
+
+    def end_transform_drag(self, label: str = "Transform") -> None:
+        before = getattr(self, "_tf_snapshot", None)
+        self._tf_snapshot = None
+        if before is None:
+            return
+        after = list(self.project.segments)
+        if after == before:
+            return
+
+        def do() -> None:
+            self.project.segments = list(after)
+            self._invalidate_layers()
+            self.changed.emit()
+            self.info_changed.emit()
+
+        def undo() -> None:
+            self.project.segments = list(before)
+            self._invalidate_layers()
+            self.changed.emit()
+            self.info_changed.emit()
+
+        self.history.push(FunctionCommand(label, do, undo), execute=False)
+
     # ── parameters ────────────────────────────────────────────────────
     def set_speed(self, value: float) -> None:
         self.project.speed_mm_s = max(0.0, value)

@@ -76,6 +76,9 @@ class SlicerScene(QGraphicsScene):
         self._grid_color = QColor(self.palette.grid)
         self._grid_step = 10.0
         self._model = SceneModel()
+        # Handle scene positions from the last render, for the window's hit-test:
+        # {"rotate": (y, z), 0: (y, z), 1: ..., 2: ..., 3: ...}.
+        self.handle_points: dict = {}
         self.setBackgroundBrush(QColor(self.palette.background))
 
     def set_palette(self, palette: ScenePalette) -> None:
@@ -86,6 +89,7 @@ class SlicerScene(QGraphicsScene):
 
     def render_model(self, model: SceneModel) -> None:
         self._model = model
+        self.handle_points = {}
         self.clear()
         if model.show_bed:
             self._draw_bed(model)
@@ -164,20 +168,20 @@ class SlicerScene(QGraphicsScene):
         pen = QPen(col, 0)
         pen.setCosmetic(True)
         brush = QBrush(QColor("#FFFFFF"))
-        r = 3.0  # scene units; cosmetic-ish (small)
+        r = max(2.0, min(rect.width(), rect.height()) * 0.03)
         corners = [
             (rect.left(), rect.top()), (rect.right(), rect.top()),
-            (rect.left(), rect.bottom()), (rect.right(), rect.bottom()),
+            (rect.right(), rect.bottom()), (rect.left(), rect.bottom()),
         ]
-        for cx, cz in corners:
-            item = self.addEllipse(QRectF(cx - r, cz - r, 2 * r, 2 * r), pen, brush)
-            item.setZValue(13)
-        # Rotate handle: a dot above the top edge centre.
+        for i, (cx, cz) in enumerate(corners):
+            self.addEllipse(QRectF(cx - r, cz - r, 2 * r, 2 * r), pen, brush).setZValue(13)
+            self.handle_points[i] = (cx, cz)
+        # Rotate handle: a dot beyond the top-centre (rect.bottom is +z = up).
         hx = (rect.left() + rect.right()) / 2
-        hz = rect.bottom() + (rect.height() * 0.12 + 4.0)  # bottom is +z (up) after flip
+        hz = rect.bottom() + (rect.height() * 0.18 + r * 3)
         self.addLine(QLineF(hx, rect.bottom(), hx, hz), pen).setZValue(12)
-        item = self.addEllipse(QRectF(hx - r, hz - r, 2 * r, 2 * r), pen, QBrush(col))
-        item.setZValue(13)
+        self.addEllipse(QRectF(hx - r, hz - r, 2 * r, 2 * r), pen, QBrush(col)).setZValue(13)
+        self.handle_points["rotate"] = (hx, hz)
 
     def _update_scene_rect(self, model: SceneModel) -> None:
         """Pad the scene around the content so the view can pan freely.

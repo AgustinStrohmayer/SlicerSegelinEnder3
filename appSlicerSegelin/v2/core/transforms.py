@@ -69,6 +69,17 @@ class Affine2D:
         )
 
     @classmethod
+    def scaling(cls, sy: float, sz: float, around: Point | None = None) -> Affine2D:
+        base = cls(a=sy, d=sz)
+        if around is None:
+            return base
+        return (
+            cls.translation(-around.y, -around.z)
+            .then(base)
+            .then(cls.translation(around.y, around.z))
+        )
+
+    @classmethod
     def mirror_y(cls, axis_z: float = 0.0) -> Affine2D:
         """Mirror across a horizontal line ``z == axis_z`` (flips Z)."""
         return cls(d=-1.0, tz=2.0 * axis_z)
@@ -98,6 +109,18 @@ def rotate_around_center(segments: Iterable[Segment], angle_deg: float) -> list[
 
 def rotate_around(segments: Iterable[Segment], angle_deg: float, pivot: Point) -> list[Segment]:
     return apply(segments, Affine2D.rotation(angle_deg, pivot))
+
+
+def scale_around_center(segments: Iterable[Segment], factor: float) -> list[Segment]:
+    """Uniformly scale ``segments`` about their bbox centre."""
+    segs = list(segments)
+    bbox = BBox.from_segments(segs)
+    if bbox is None:
+        return []
+    centre = bbox.center()
+    if centre is None:
+        return segs
+    return apply(segs, Affine2D.scaling(factor, factor, centre))
 
 
 def translate(segments: Iterable[Segment], dy: float, dz: float) -> list[Segment]:

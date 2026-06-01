@@ -72,6 +72,8 @@ class MainWindow(QMainWindow):
         self._drag_raw = None          # unsnapped accumulator during a drag
         self._guides: list = []        # snap guide lines for the scene
         self._live_label = None        # (text, y, z) shown near the cursor
+        self._cursor = (0.0, 0.0)      # last cursor position in scene coords
+        self._tf_ref = None            # rotate/scale drag reference (angle/dist)
 
         # Parts gallery sits beside the canvas in a splitter; toggling each
         # side's visibility gives the single / grid / split view modes.
@@ -326,6 +328,7 @@ class MainWindow(QMainWindow):
 
     def _on_cursor_moved(self, y: float, z: float) -> None:
         self._status_coord.setText(f"Y {y:7.2f}  Z {z:7.2f}")
+        self._cursor = (y, z)
         if self._measure_mode and self._measure_a is not None and self._measure_b is None:
             self._measure_cursor = Point(y, z)
             self._refresh_canvas()
@@ -641,7 +644,12 @@ class MainWindow(QMainWindow):
         import math
 
         tol = self._scene_tolerance()
-        # Cuts are thin targets → test them first.
+        # Rotate/scale handles (only when the part is already selected) win first.
+        if self._selection and self._selection[0] == "part":
+            for name, (hy, hz) in self.scene.handle_points.items():
+                if math.hypot(scene_pt.x() - hy, scene_pt.y() - hz) <= tol * 1.6:
+                    return ("rotate", None) if name == "rotate" else ("scale", name)
+        # Cuts are thin targets → test them next.
         if c.project.use_manual_cuts:
             for i, cut in enumerate(c.project.manual_cuts):
                 a, b, cc = cut.to_machine_line(c.project.offset_y, c.project.offset_z)
@@ -679,9 +687,46 @@ class MainWindow(QMainWindow):
             self._selection = None
             self._refresh_canvas()
 
+    def _part_center(self):
+        bb = self._base_bbox()
+        if bb is None:
+            return None
+        y0, z0, y1, z1 = bb
+        p = self.controller.project
+        return ((y0 + y1) / 2 + p.offset_y, (z0 + z1) / 2 + p.offset_z)
+
     def _on_object_drag(self, handle, dy: float, dz: float) -> None:
-        self._selection = handle  # dragging selects
+        import math
+
         kind, idx = handle
+        if kind in ("rotate", "scale"):
+            center = self._part_center()
+            if center is None:
+                return
+            cx, cz = center
+            cu_y, cu_z = self._cursor
+            c = self.controller
+            if kind == "rotate":
+                ang = math.degrees(math.atan2(cu_z - cz, cu_y - cx))
+                if not self._dragging_obj:
+                    c.begin_transform_drag()
+                    self._tf_ref = ang
+                    self._dragging_obj = True
+                total = ang - self._tf_ref
+                c.rotate_drag(total)
+                self._live_label = (f"{total:+.1f}°", cx, cz)
+            else:  # scale
+                dist = math.hypot(cu_y - cx, cu_z - cz)
+                if not self._dragging_obj:
+                    c.begin_transform_drag()
+                    self._tf_ref = max(1e-6, dist)
+                    self._dragging_obj = True
+                factor = dist / self._tf_ref
+                c.scale_drag(factor)
+                self._live_label = (f"{factor * 100:.0f}%", cx, cz)
+            return
+
+        self._selection = handle  # dragging part/cut selects it
         c = self.controller
         if kind == "part":
             if not self._dragging_obj:
@@ -710,8 +755,13 @@ class MainWindow(QMainWindow):
             self.controller.end_part_move()
         elif kind == "cut":
             self.controller.end_cut_move(idx)
+        elif kind == "rotate":
+            self.controller.end_transform_drag("Rotate")
+        elif kind == "scale":
+            self.controller.end_transform_drag("Scale")
         self._dragging_obj = False
         self._drag_raw = None
+        self._tf_ref = None
         self._guides = []
         self._live_label = None
         self._refresh_canvas()
@@ -885,6 +935,7 @@ class MainWindow(QMainWindow):
             measure=measure[0],
             measure_active=measure[1],
             selected=self._selection if not focused else None,
+            handles=bool(self._selection and self._selection[0] == "part" and not focused),
             guides=list(self._guides),
             live_label=self._live_label,
         )
