@@ -14,6 +14,40 @@ from PyQt6.QtWidgets import QFrame, QGraphicsOpacityEffect, QHBoxLayout, QLabel,
 
 Severity = Literal["info", "success", "warning", "danger"]
 
+# At most this many toasts are kept on screen; older ones fade out so the
+# stack never grows past the window height.
+MAX_VISIBLE = 4
+
+
+class _ElidingLabel(QLabel):
+    """A single-line label that middle-elides text too wide for the card.
+
+    Toast bodies are often file names/paths. A long unbroken token can't be
+    word-wrapped, so we elide in the middle ("verylong…name.gcode") to keep
+    both the start and the extension legible while staying inside the card.
+    """
+
+    def __init__(self, text: str) -> None:
+        super().__init__()
+        self._full = text
+        super().setText(text)
+
+    def setText(self, text: str) -> None:  # type: ignore[override]
+        self._full = text
+        self._elide()
+
+    def resizeEvent(self, event) -> None:  # type: ignore[override]
+        super().resizeEvent(event)
+        self._elide()
+
+    def _elide(self) -> None:
+        width = max(0, self.width())
+        elided = self.fontMetrics().elidedText(self._full, Qt.TextElideMode.ElideMiddle, width)
+        # Bypass our own override so this doesn't recurse.
+        QLabel.setText(self, elided)
+        if elided != self._full:
+            self.setToolTip(self._full)
+
 
 class ToastHost(QWidget):
     """Floating container that stacks toasts in the top-right corner."""
@@ -56,6 +90,14 @@ class ToastHost(QWidget):
         toast.dismissed.connect(lambda t=toast: self._remove(t))
         if severity != "danger":
             QTimer.singleShot(duration_ms, toast.fade_out)
+        self._enforce_cap()
+
+    def _enforce_cap(self) -> None:
+        live = [self._layout.itemAt(i).widget() for i in range(self._layout.count())]
+        live = [w for w in live if w is not None]
+        for w in live[:-MAX_VISIBLE]:  # fade the oldest until at most MAX_VISIBLE remain
+            if not w.is_closing():
+                w.fade_out()
 
     def _remove(self, toast: _Toast) -> None:
         self._layout.removeWidget(toast)
@@ -75,6 +117,7 @@ class _Toast(QFrame):
         self.setFrameShape(QFrame.Shape.StyledPanel)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setMaximumWidth(336)  # stay within the 360px host, never off-window
+        self._closing = False
 
         outer = QHBoxLayout(self)
         outer.setContentsMargins(12, 8, 12, 8)
@@ -84,10 +127,12 @@ class _Toast(QFrame):
         text_col.setSpacing(2)
         t = QLabel(title)
         t.setProperty("role", "title")
+        t.setWordWrap(True)
         text_col.addWidget(t)
         if body:
-            b = QLabel(body)
-            b.setWordWrap(True)
+            # Eliding label: long unbroken file names stay inside the card
+            # instead of being clipped mid-word at the right edge.
+            b = _ElidingLabel(body)
             b.setProperty("class", "muted")
             text_col.addWidget(b)
         outer.addLayout(text_col, 1)
@@ -101,7 +146,13 @@ class _Toast(QFrame):
         self._anim.setEndValue(1.0)
         self._anim.start()
 
+    def is_closing(self) -> bool:
+        return self._closing
+
     def fade_out(self) -> None:
+        if self._closing:
+            return
+        self._closing = True
         out = QPropertyAnimation(self._fx, b"opacity", self)
         out.setDuration(220)
         out.setStartValue(self._fx.opacity())

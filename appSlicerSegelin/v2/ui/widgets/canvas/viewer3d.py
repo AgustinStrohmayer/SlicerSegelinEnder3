@@ -144,13 +144,17 @@ class Viewer3D(QWidget):
         # Heated bed + measurement grid.
         bed_top = _hex_rgba(c.surface_alt, 1.0)
         self._box(0, 0, -4, BED, BED, 0, bed_top)
-        grid = gl.GLGridItem()
-        grid.setSize(BED, BED)
-        grid.setSpacing(20, 20)
-        grid.translate(BED / 2, BED / 2, 0.5)
-        gr, gg, gb, _ = _hex_rgba(c.muted)
-        grid.setColor((gr, gg, gb, 0.8))
-        self._add(grid)
+        # Hand-built 20 mm grid as crisp line segments sitting just above the
+        # bed top. (GLGridItem's thin translucent lines wash out to invisible
+        # over the light bed; explicit GLLinePlotItem lines stay legible.)
+        step = 20.0
+        grid_pts: list[list[float]] = []
+        for i in range(int(BED // step) + 1):
+            v = i * step
+            grid_pts += [[v, 0.0, 0.6], [v, BED, 0.6]]   # line along Y
+            grid_pts += [[0.0, v, 0.6], [BED, v, 0.6]]   # line along X
+        self._add(gl.GLLinePlotItem(pos=np.array(grid_pts), color=_hex_rgba(c.muted, 0.9),
+                                    width=1.0, antialias=True, mode="lines"))
 
         # Stylised Ender-3 frame (2020 extrusions) behind the bed.
         frame = _hex_rgba(c.muted, 1.0)
@@ -181,13 +185,13 @@ class Viewer3D(QWidget):
             for sg in self._segments:
                 pts.append([sg.a.y, yf0, sg.a.z])
                 pts.append([sg.b.y, yf0, sg.b.z])
-            faint = _hex_rgba(c.muted, 0.55)
-            self._add(gl.GLLinePlotItem(pos=np.array(pts), color=faint, width=1.4,
+            faint = _hex_rgba(c.muted, 0.85)
+            self._add(gl.GLLinePlotItem(pos=np.array(pts), color=faint, width=1.6,
                                         antialias=True, mode="lines"))
-            # back-face copy + a few depth connectors for the extruded look
+            # back-face copy gives the extruded-through-foam look.
             backp = [[p[0], yf1, p[2]] for p in pts]
-            self._add(gl.GLLinePlotItem(pos=np.array(backp), color=_hex_rgba(c.muted, 0.3),
-                                        width=1.0, antialias=True, mode="lines"))
+            self._add(gl.GLLinePlotItem(pos=np.array(backp), color=_hex_rgba(c.muted, 0.5),
+                                        width=1.2, antialias=True, mode="lines"))
 
         # Cut-so-far polyline (front face), bright accent.
         self._cut = gl.GLLinePlotItem(pos=np.zeros((0, 3)), color=_hex_rgba(c.accent, 1.0),
