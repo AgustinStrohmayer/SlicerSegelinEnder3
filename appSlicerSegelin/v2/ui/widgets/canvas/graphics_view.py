@@ -21,6 +21,7 @@ class CanvasView(QGraphicsView):
     clicked = pyqtSignal(float, float)
     cursorMoved = pyqtSignal(float, float)
     transformChanged = pyqtSignal()
+    escapePressed = pyqtSignal()
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -61,6 +62,10 @@ class CanvasView(QGraphicsView):
     def keyPressEvent(self, event: QKeyEvent) -> None:
         if event.key() == Qt.Key.Key_F and not event.modifiers():
             self.fit_to_content()
+            event.accept()
+            return
+        if event.key() == Qt.Key.Key_Escape:
+            self.escapePressed.emit()
             event.accept()
             return
         super().keyPressEvent(event)

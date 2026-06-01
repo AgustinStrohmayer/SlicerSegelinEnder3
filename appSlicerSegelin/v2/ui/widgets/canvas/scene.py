@@ -8,11 +8,12 @@ fractional position with a moving head marker.
 """
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 
 from PyQt6.QtCore import QLineF, QRectF, Qt
 from PyQt6.QtGui import QBrush, QColor, QPainter, QPainterPath, QPen
-from PyQt6.QtWidgets import QGraphicsScene
+from PyQt6.QtWidgets import QGraphicsItem, QGraphicsScene
 
 from ....core.geometry import Point, Segment, SegmentKind
 
@@ -30,6 +31,9 @@ class ScenePalette:
     danger: str = "#F87171"
     bed: str = "#3A4256"
     surface_alt: str = "#1B2230"
+    measure: str = "#22D3EE"   # cyan — reads as "measurement", distinct from the cut colour
+    dim_line: str = "#8A93A6"  # dimension witness/arrow lines
+    dim_text: str = "#E6E8EE"  # dimension labels
 
 
 _KIND_COLOR = {
@@ -54,6 +58,9 @@ class SceneModel:
     bed_z: float = 100.0
     show_bed: bool = True
     show_grid: bool = True
+    show_dims: bool = False                       # overlay the part's W×H
+    measure: tuple[Point, Point] | None = None    # (a, b) of the measure tool
+    measure_active: bool = False                  # True while picking the 2nd point
 
 
 class SlicerScene(QGraphicsScene):
@@ -83,6 +90,10 @@ class SlicerScene(QGraphicsScene):
             self._draw_trajectory(model)
         if model.entry_point is not None:
             self._draw_entry(model.entry_point)
+        if model.show_dims and model.segments:
+            self._draw_dims(model)
+        if model.measure is not None:
+            self._draw_measure(model)
         self._update_scene_rect(model)
 
     def _update_scene_rect(self, model: SceneModel) -> None:
@@ -173,6 +184,58 @@ class SlicerScene(QGraphicsScene):
 
     def _draw_entry(self, p: Point) -> None:
         self._draw_dot(p, self.palette.entry, 3.0)
+
+    # ── measurement + dimensions ──────────────────────────────────────
+    def _add_label(self, text: str, x: float, y: float, color: str) -> None:
+        """Add a screen-constant-size text label anchored at scene (x, y)."""
+        item = self.addText(text)
+        item.setDefaultTextColor(QColor(color))
+        font = item.font()
+        font.setPointSizeF(8.5)
+        item.setFont(font)
+        # Stay upright and a fixed size regardless of zoom / the flipped Y.
+        item.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIgnoresTransformations, True)
+        item.setZValue(21)
+        item.setPos(x, y)
+
+    def _draw_measure(self, model: SceneModel) -> None:
+        a, b = model.measure  # type: ignore[misc]
+        col = self.palette.measure
+        pen = QPen(QColor(col), 0)
+        pen.setCosmetic(True)
+        pen.setWidthF(1.8)
+        if model.measure_active:
+            pen.setStyle(Qt.PenStyle.DashLine)
+        self.addLine(QLineF(a.y, a.z, b.y, b.z), pen).setZValue(15)
+        self._draw_dot(a, col, 2.2)
+        self._draw_dot(b, col, 2.2)
+        dy, dz = b.y - a.y, b.z - a.z
+        dist = math.hypot(dy, dz)
+        self._add_label(
+            f"{dist:.1f} mm  (Δy {dy:+.1f}, Δz {dz:+.1f})",
+            (a.y + b.y) / 2, (a.z + b.z) / 2, col,
+        )
+
+    def _draw_dims(self, model: SceneModel) -> None:
+        ys = [p for s in model.segments for p in (s.a.y, s.b.y)]
+        zs = [p for s in model.segments for p in (s.a.z, s.b.z)]
+        y0, y1, z0, z1 = min(ys), max(ys), min(zs), max(zs)
+        w, h = y1 - y0, z1 - z0
+        if w <= 1e-6 and h <= 1e-6:
+            return
+        pen = QPen(QColor(self.palette.dim_line), 0)
+        pen.setCosmetic(True)
+        off = max(w, h) * 0.07 + 3.0
+        # Width dimension below the bounding box.
+        zb = z0 - off
+        for ln in (QLineF(y0, zb, y1, zb), QLineF(y0, z0, y0, zb), QLineF(y1, z0, y1, zb)):
+            self.addLine(ln, pen).setZValue(14)
+        self._add_label(f"{w:.1f} mm", (y0 + y1) / 2, zb, self.palette.dim_text)
+        # Height dimension to the left of the bounding box.
+        yl = y0 - off
+        for ln in (QLineF(yl, z0, yl, z1), QLineF(y0, z0, yl, z0), QLineF(y0, z1, yl, z1)):
+            self.addLine(ln, pen).setZValue(14)
+        self._add_label(f"{h:.1f} mm", yl, (z0 + z1) / 2, self.palette.dim_text)
 
     def _draw_dot(self, p: Point, color: str, r: float) -> None:
         pen = QPen(QColor(color), 0)

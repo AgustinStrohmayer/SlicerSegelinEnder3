@@ -13,7 +13,7 @@ from PyQt6.QtWidgets import QWidget
 
 from ..canvas.graphics_view import CanvasView
 
-RULER_THICKNESS = 22
+RULER_THICKNESS = 26
 
 
 class _Ruler(QWidget):
@@ -51,7 +51,8 @@ class _Ruler(QWidget):
             return
 
         font = QFont(self.font())
-        font.setPointSize(8)
+        font.setPointSize(9)
+        font.setWeight(QFont.Weight.Medium)
         painter.setFont(font)
 
         major, minor = self._tick_steps()

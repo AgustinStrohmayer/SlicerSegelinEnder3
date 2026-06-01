@@ -106,6 +106,13 @@ class MainWindow(QMainWindow):
         self._picking_diagonal = False
         self._diag_first: Point | None = None
 
+        # Canvas measurement tools
+        self._measure_mode = False
+        self._measure_a: Point | None = None
+        self._measure_b: Point | None = None
+        self._measure_cursor: Point | None = None
+        self._show_dims = False
+
         # Wire controller
         self.controller.changed.connect(self._refresh_canvas)
         self.controller.changed.connect(self._refresh_info)
@@ -120,6 +127,7 @@ class MainWindow(QMainWindow):
         # Canvas readouts — connected now that the status bar exists.
         self.view.cursorMoved.connect(self._on_cursor_moved)
         self.view.transformChanged.connect(self._on_transform_changed)
+        self.view.escapePressed.connect(self._on_canvas_escape)
 
         QShortcut(QKeySequence("Ctrl+K"), self).activated.connect(self.palette.open)
         QShortcut(QKeySequence("?"), self).activated.connect(self._open_shortcuts_overlay)
@@ -205,6 +213,22 @@ class MainWindow(QMainWindow):
         spacer = QWidget(self)
         spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         bar.addWidget(spacer)
+        # Measure tool (checkable) — shared between toolbar and View menu.
+        self._measure_action = QAction("Measure", self)
+        set_icon(self._measure_action, "ruler", col)
+        self._measure_action.setCheckable(True)
+        self._measure_action.setShortcut("M")
+        self._measure_action.setToolTip("Measure distance between two points  (M)")
+        self._measure_action.toggled.connect(self._toggle_measure)
+        bar.addAction(self._measure_action)
+
+        self._dims_action = QAction("Dimensions", self)
+        set_icon(self._dims_action, "maximize", col)
+        self._dims_action.setCheckable(True)
+        self._dims_action.setToolTip("Show the part's width × height on the canvas")
+        self._dims_action.toggled.connect(self._toggle_dims)
+        bar.addAction(self._dims_action)
+
         act("layers", "Cycle view: single / split / grid", self._cycle_view)
         act("command", "Command palette (Ctrl+K)", self.palette.open)
         act("help", "Keyboard shortcuts (?)", self._open_shortcuts_overlay)
@@ -246,6 +270,8 @@ class MainWindow(QMainWindow):
 
         m = mb.addMenu("&View")
         add(m, "Fit to content", self.view.fit_to_content, "F")
+        m.addAction(self._measure_action)
+        m.addAction(self._dims_action)
         m.addSeparator()
         add(m, "Single canvas", lambda: self._set_view_mode("single"), "Ctrl+1")
         add(m, "Parts grid", lambda: self._set_view_mode("grid"), "Ctrl+2")
@@ -281,6 +307,9 @@ class MainWindow(QMainWindow):
 
     def _on_cursor_moved(self, y: float, z: float) -> None:
         self._status_coord.setText(f"Y {y:7.2f}  Z {z:7.2f}")
+        if self._measure_mode and self._measure_a is not None and self._measure_b is None:
+            self._measure_cursor = Point(y, z)
+            self._refresh_canvas()
 
     def _on_transform_changed(self) -> None:
         self._status_zoom.setText(f"{self.view.zoom_percent()}%")
@@ -305,6 +334,8 @@ class MainWindow(QMainWindow):
         r.register(CommandEntry("view.fit", "View: Fit to content", self.view.fit_to_content, "F"))
         r.register(CommandEntry("view.theme", "View: Toggle theme", self._toggle_theme, "Ctrl+T"))
         r.register(CommandEntry("view.shortcuts", "View: Keyboard shortcuts", self._open_shortcuts_overlay, "?"))
+        r.register(CommandEntry("view.measure", "View: Measure tool", self._measure_action.trigger, "M"))
+        r.register(CommandEntry("view.dims", "View: Toggle part dimensions", self._dims_action.trigger))
         r.register(CommandEntry("preview.gen", "Preview: Generate plates/parts", self.controller.generate_preview))
 
     # ── file dialogs / actions ────────────────────────────────────────
@@ -493,6 +524,9 @@ class MainWindow(QMainWindow):
         self.sidebar.set_diagonal_status("Diagonal: click P1 on the canvas")
 
     def _on_canvas_click(self, scene_y: float, scene_z: float) -> None:
+        if self._measure_mode:
+            self._on_measure_click(scene_y, scene_z)
+            return
         if not self._picking_diagonal:
             return
         # canvas coords are machine coords → convert to base for the cut
@@ -505,6 +539,59 @@ class MainWindow(QMainWindow):
         self._picking_diagonal = False
         self._diag_first = None
         self.sidebar.set_diagonal_status("Diagonal: inactive" if ok else "Diagonal: failed, retry")
+
+    # ── measurement tool ──────────────────────────────────────────────
+    def _measure_geometry(self):
+        """Return ((a, b) | None, active) for the current measurement."""
+        a = self._measure_a
+        if a is None:
+            return (None, False)
+        if self._measure_b is not None:
+            return ((a, self._measure_b), False)
+        if self._measure_cursor is not None:
+            return ((a, self._measure_cursor), True)
+        return (None, False)
+
+    def _on_measure_click(self, y: float, z: float) -> None:
+        import math
+
+        p = Point(y, z)
+        if self._measure_a is None or self._measure_b is not None:
+            # Start a fresh measurement.
+            self._measure_a, self._measure_b, self._measure_cursor = p, None, p
+        else:
+            self._measure_b = p
+            dy, dz = p.y - self._measure_a.y, p.z - self._measure_a.z
+            dist = math.hypot(dy, dz)
+            self.statusBar().showMessage(
+                f"Measured {dist:.2f} mm   ·   Δy {dy:+.2f}   Δz {dz:+.2f}", 8000
+            )
+        self._refresh_canvas()
+
+    def _toggle_measure(self, on: bool) -> None:
+        self._measure_mode = on
+        if on:
+            self._picking_diagonal = False  # mutually exclusive
+            self.statusBar().showMessage("Measure: click two points (Esc clears)", 4000)
+        else:
+            self._measure_a = self._measure_b = self._measure_cursor = None
+        self.view.viewport().setCursor(
+            Qt.CursorShape.CrossCursor if on else Qt.CursorShape.ArrowCursor
+        )
+        self._refresh_canvas()
+
+    def _toggle_dims(self, on: bool) -> None:
+        self._show_dims = on
+        self._refresh_canvas()
+
+    def _on_canvas_escape(self) -> None:
+        if self._measure_a is not None or self._measure_b is not None:
+            self._measure_a = self._measure_b = self._measure_cursor = None
+            self._refresh_canvas()
+        elif self._picking_diagonal:
+            self._picking_diagonal = False
+            self._diag_first = None
+            self.sidebar.set_diagonal_status("Diagonal: inactive")
 
     # ── simulation ────────────────────────────────────────────────────
     def _on_play_toggled(self, playing: bool) -> None:
@@ -571,6 +658,7 @@ class MainWindow(QMainWindow):
             self.scene.palette.cut = c.part_settings[c.focused_layer].color or accent
         else:
             self.scene.palette.cut = accent
+        measure = self._measure_geometry()
         model = SceneModel(
             segments=segments,
             trajectory=traj,
@@ -581,6 +669,9 @@ class MainWindow(QMainWindow):
             bed_z=c.project.area_z_mm,
             show_bed=not focused,
             show_grid=c.project.view.show_grid,
+            show_dims=self._show_dims,
+            measure=measure[0],
+            measure_active=measure[1],
         )
         self.scene.render_model(model)
         self._status_segs.setText(f"{len(c.project.segments)} segs")
@@ -608,6 +699,7 @@ class MainWindow(QMainWindow):
                 background=t.bg, grid=t.border, axis=t.accent, cut=t.accent,
                 entry=t.success, exit=t.danger, travel=t.muted, union=t.warning,
                 danger=t.danger, bed=t.border_strong, surface_alt=t.surface_alt,
+                dim_line=t.muted, dim_text=t.text,
             )
         )
         self.canvas.apply_ruler_palette(tokens)
