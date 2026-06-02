@@ -11,11 +11,17 @@ hot-wire foam cutter built on an Ender-3:
 * the **cut** — the (Y, Z) profile extruded through the block, revealed as the
   simulation plays.
 
+The G-code only drives the machine Y and Z axes (``G1 Y.. Z..``), so the cut
+lives entirely in the vertical Y–Z plane and the wire — horizontal, fixed —
+runs left↔right along the gantry (machine X), spanning the foam depth a.k.a.
+the wing span.
+
 Axis convention (3D ← app):
-    3D X  ← app Y   (profile horizontal, 0..area_y)
+    3D X  =  foam depth (the wire's length); the wire runs left↔right along X
+             at a fixed (Y, Z) and sweeps as the machine traces the profile.
+    3D Y  ← app Y   (profile horizontal / chord, 0..area_y) — recedes into the
+             scene, so the airfoil is traced in the vertical Y–Z plane.
     3D Z  ← app Z   (profile height,    0..area_z)
-    3D Y  =  foam depth (the wire's length); the wire runs along Y at a fixed
-             (X, Z) and sweeps as the machine traces the profile.
 
 Built on pyqtgraph.opengl so it embeds cleanly in the Qt window and renders
 through the GPU. Degrades gracefully when no geometry is loaded.
@@ -92,11 +98,15 @@ class Viewer3D(QWidget):
         self._rebuild()
 
     def set_wire(self, app_y: float, app_z: float) -> None:
-        """Position the horizontal hot wire at (profile Y, profile Z)."""
+        """Position the horizontal hot wire at (profile Y, profile Z).
+
+        The wire spans the foam depth along 3D X (left↔right) at the fixed
+        profile point (3D Y = app_y, 3D Z = app_z).
+        """
         if self._wire is None:
             return
-        y0, y1 = self._foam_depth_span()
-        self._wire.setData(pos=np.array([[app_y, y0 - 6, app_z], [app_y, y1 + 6, app_z]]))
+        d0, d1 = self._depth_span()
+        self._wire.setData(pos=np.array([[d0 - 6, app_y, app_z], [d1 + 6, app_y, app_z]]))
 
     def set_cut(self, trajectory: list[Segment], fraction: float) -> None:
         """Reveal the cut profile (front face) up to ``fraction`` of the path."""
@@ -107,20 +117,21 @@ class Viewer3D(QWidget):
             return
         n = len(cut)
         upto = max(0, min(n, round(fraction * n)))
-        yf, _ = self._foam_depth_span()
+        df, _ = self._depth_span()  # front face (near side of the foam)
         pts: list[list[float]] = []
         for s in cut[:upto]:
-            pts.append([s.a.y, yf, s.a.z])
-            pts.append([s.b.y, yf, s.b.z])
+            pts.append([df, s.a.y, s.a.z])
+            pts.append([df, s.b.y, s.b.z])
         self._cut.setData(pos=np.array(pts) if pts else np.zeros((0, 3)))
         if cut and upto:
             head = cut[upto - 1].b
             self.set_wire(head.y, head.z)
 
     # ── scene build ───────────────────────────────────────────────────
-    def _foam_depth_span(self) -> tuple[float, float]:
-        y0 = (BED - self._depth) / 2.0
-        return (y0, y0 + self._depth)
+    def _depth_span(self) -> tuple[float, float]:
+        """Foam depth span along 3D X (the wire's left↔right travel), centred on the bed."""
+        d0 = (BED - self._depth) / 2.0
+        return (d0, d0 + self._depth)
 
     def _add(self, item) -> None:
         self.view.addItem(item)
@@ -170,47 +181,48 @@ class Viewer3D(QWidget):
         self._box(-s, BED - s, COL_HEIGHT - s, BED + s, BED, COL_HEIGHT, frame)
 
         # Foam block (the stock), translucent, sized to the work area.
-        yf0, yf1 = self._foam_depth_span()
+        # 3D X = depth span, 3D Y = profile width (chord), 3D Z = profile height.
+        d0, d1 = self._depth_span()
         foam = _hex_rgba(c.accent, 0.16)
-        self._box(0, yf0, 0, self._area_y, yf1, self._area_z, foam, gl_opts="translucent")
+        self._box(d0, 0, 0, d1, self._area_y, self._area_z, foam, gl_opts="translucent")
         # foam wireframe edges for definition
-        edges = gl.GLBoxItem(size=QVector3D(self._area_y, self._depth, self._area_z),
+        edges = gl.GLBoxItem(size=QVector3D(self._depth, self._area_y, self._area_z),
                              color=_pg_color(c.muted))
-        edges.translate(0, yf0, 0)
+        edges.translate(d0, 0, 0)
         self._add(edges)
 
-        # Target profile (full), faint, on the front face.
+        # Target profile (full), faint, on the near (front) face of the foam.
         if self._segments:
             pts = []
             for sg in self._segments:
-                pts.append([sg.a.y, yf0, sg.a.z])
-                pts.append([sg.b.y, yf0, sg.b.z])
+                pts.append([d0, sg.a.y, sg.a.z])
+                pts.append([d0, sg.b.y, sg.b.z])
             faint = _hex_rgba(c.muted, 0.85)
             self._add(gl.GLLinePlotItem(pos=np.array(pts), color=faint, width=1.6,
                                         antialias=True, mode="lines"))
-            # back-face copy gives the extruded-through-foam look.
-            backp = [[p[0], yf1, p[2]] for p in pts]
+            # far-face copy gives the extruded-through-foam look.
+            backp = [[d1, p[1], p[2]] for p in pts]
             self._add(gl.GLLinePlotItem(pos=np.array(backp), color=_hex_rgba(c.muted, 0.5),
                                         width=1.2, antialias=True, mode="lines"))
 
-        # Cut-so-far polyline (front face), bright accent.
+        # Cut-so-far polyline (near face), bright accent.
         self._cut = gl.GLLinePlotItem(pos=np.zeros((0, 3)), color=_hex_rgba(c.accent, 1.0),
                                       width=3.0, antialias=True, mode="lines")
         self._add(self._cut)
 
-        # Hot wire — bright, spans the foam depth, parked at the profile start.
-        yf0, yf1 = self._foam_depth_span()
+        # Hot wire — bright, horizontal, spans the foam depth (left↔right along
+        # 3D X), parked at the profile start.
         start = self._segments[0].a if self._segments else None
         wy = start.y if start else self._area_y / 2
         wz = start.z if start else self._area_z / 2
         self._wire = gl.GLLinePlotItem(
-            pos=np.array([[wy, yf0 - 6, wz], [wy, yf1 + 6, wz]]),
+            pos=np.array([[d0 - 6, wy, wz], [d1 + 6, wy, wz]]),
             color=(1.0, 0.32, 0.12, 1.0), width=5.0, antialias=True,
         )
         self._add(self._wire)
 
         # Aim the camera at the foam centre.
-        self.view.opts["center"] = QVector3D(self._area_y / 2, BED / 2, self._area_z / 2)
+        self.view.opts["center"] = QVector3D(BED / 2, self._area_y / 2, self._area_z / 2)
         self.view.update()
 
 
