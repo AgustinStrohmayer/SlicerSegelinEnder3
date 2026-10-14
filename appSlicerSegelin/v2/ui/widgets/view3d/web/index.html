@@ -8,17 +8,17 @@
 </head>
 <body>
 <div id="stage"></div>
-<div id="toolbar">
-  <button data-view="fit" title="Fit everything (F or double-click)">⤢</button>
-  <button data-view="iso" title="Isometric view">Iso</button>
-  <button data-view="front" title="Front view">Front</button>
-  <button data-view="side" title="Side view">Side</button>
-  <button data-view="top" title="Top view">Top</button>
-  <span class="sep"></span>
-  <button data-view="ortho" title="Toggle orthographic / perspective (O)" class="toggle">Ortho</button>
+<canvas id="gizmo" title="Drag: orbit · Click an axis: look along it (X/Y/Z, Shift = opposite)"></canvas>
+<div id="camera-bar">
+  <button id="cam-ortho" aria-pressed="false" title="Switch to orthographic (O)">
+    <svg viewBox="0 0 24 24"><path d="M12 3 20 7.5v9L12 21l-8-4.5v-9z"/><path d="M4 7.5 12 12l8-4.5M12 12v9"/></svg>
+  </button>
+  <button id="cam-reset" title="Reset view: frame everything (H) · double-click or F frames from the current angle">
+    <svg viewBox="0 0 24 24"><path d="M4 9V5a1 1 0 0 1 1-1h4M15 4h4a1 1 0 0 1 1 1v4M20 15v4a1 1 0 0 1-1 1h-4M9 20H5a1 1 0 0 1-1-1v-4"/><circle cx="12" cy="12" r="2.2"/></svg>
+  </button>
 </div>
-<canvas id="gizmo" width="168" height="168"></canvas>
-<div id="hint">drag to orbit · right-drag to pan · wheel to zoom</div>
+<div id="feedback" role="status"></div>
+<div id="hint">drag to orbit · right-drag to pan · wheel to zoom · double-click to fit</div>
 <script type="module" src="scene.js"></script>
 </body>
 </html>

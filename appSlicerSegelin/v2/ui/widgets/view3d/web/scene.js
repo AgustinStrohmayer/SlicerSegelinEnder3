@@ -1,12 +1,12 @@
 // Studio-style 3D viewport driven from Python (see view3d/three_backend.py).
 // Z is up, units are millimetres. Python sends batches of commands through S.run([...]).
 import * as THREE from 'three';
-import { OrbitControls } from './vendor/controls/OrbitControls.js';
 import { Line2 } from './vendor/lines/Line2.js';
 import { LineGeometry } from './vendor/lines/LineGeometry.js';
 import { LineMaterial } from './vendor/lines/LineMaterial.js';
 import { LineSegments2 } from './vendor/lines/LineSegments2.js';
 import { LineSegmentsGeometry } from './vendor/lines/LineSegmentsGeometry.js';
+import { createNavigation, FEEL } from './navigation.js';
 
 const FOV = 35;
 const stage = document.getElementById('stage');
@@ -53,18 +53,9 @@ const persp = new THREE.PerspectiveCamera(FOV, 1, 0.5, 20000);
 const ortho = new THREE.OrthographicCamera(-1, 1, 1, -1, -20000, 20000);
 persp.up.set(0, 0, 1);
 ortho.up.set(0, 0, 1);
-let camera = persp;
-const controls = new OrbitControls(camera, renderer.domElement);
-controls.enableDamping = true;
-controls.dampingFactor = 0.12;
-controls.zoomToCursor = true;
-controls.screenSpacePanning = true;
-controls.mouseButtons = { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.PAN, RIGHT: THREE.MOUSE.PAN };
-controls.addEventListener('start', () => document.body.classList.add('used'));
 
 let needs = true;
 let boundsDirty = true;
-let theme = { dark: true, accent: '#f59e0b' };
 const bounds = new THREE.Box3();
 
 // ── helpers ───────────────────────────────────────────────────────────
@@ -163,8 +154,8 @@ function progress(a) {
   o.geometry.instanceCount = count;
   o.visible = count > 0 || !!a.head;
   let h = o.userData.head;
-  if (a.head && n > 0) {
-    const last = strip ? full.subarray((n - 1) * 3, n * 3) : full.subarray(n * 6 - 3, n * 6);
+  if (a.head && full.length >= 3) {
+    const last = n === 0 ? full.subarray(0, 3) : strip ? full.subarray((n - 1) * 3, n * 3) : full.subarray(n * 6 - 3, n * 6);
     if (!h) {
       const ga = new LineSegmentsGeometry();
       ga.setPositions(new Float32Array(6));
@@ -204,45 +195,8 @@ function setColor(a) {
   }
 }
 
-// ── camera ────────────────────────────────────────────────────────────
-let fly = null;
+// ── camera (navigation.js: Topolabs-style damped orbit + gizmo) ─────────
 function sizeOf() { return [Math.max(1, stage.clientWidth), Math.max(1, stage.clientHeight)]; }
-function setOrthoFrustum() {
-  const [w, h] = sizeOf();
-  const d = persp.position.distanceTo(controls.target);
-  const half = d * Math.tan(THREE.MathUtils.degToRad(FOV / 2));
-  ortho.left = -half * w / h; ortho.right = half * w / h; ortho.top = half; ortho.bottom = -half;
-  ortho.updateProjectionMatrix();
-}
-function useCamera(isOrtho) {
-  const prev = camera;
-  if (isOrtho === (camera === ortho)) return;
-  if (isOrtho) {
-    persp.position.copy(prev.position); setOrthoFrustum(); ortho.zoom = 1;
-  } else {
-    const d = prev.position.distanceTo(controls.target) / Math.max(prev.zoom, 1e-6);
-    persp.position.copy(controls.target).add(prev.position.clone().sub(controls.target).normalize().multiplyScalar(d));
-  }
-  camera = isOrtho ? ortho : persp;
-  camera.position.copy(isOrtho ? prev.position : persp.position);
-  camera.quaternion.copy(prev.quaternion);
-  camera.updateProjectionMatrix();
-  controls.object = camera;
-  controls.update();
-  document.querySelector('[data-view=ortho]').classList.toggle('on', isOrtho);
-  needs = true;
-}
-function flyTo(pos, target, seconds = 0.55) {
-  if (seconds <= 0) {
-    camera.position.copy(pos); controls.target.copy(target); camera.zoom = 1; camera.updateProjectionMatrix();
-    controls.update(); needs = true; return;
-  }
-  fly = { t: 0, T: seconds, p0: camera.position.clone(), p1: pos, c0: controls.target.clone(), c1: target, z0: camera.zoom };
-}
-function sphericalDir(elev, azim) {
-  const e = THREE.MathUtils.degToRad(elev), z = THREE.MathUtils.degToRad(azim);
-  return new THREE.Vector3(Math.cos(e) * Math.cos(z), Math.cos(e) * Math.sin(z), Math.sin(e));
-}
 function updateBounds() {
   bounds.makeEmpty();
   content.traverseVisible(o => { if (o.isMesh || o.isLine2 || o.isLineSegments2 || o.isPoints) bounds.expandByObject(o); });
@@ -260,126 +214,39 @@ function updateBounds() {
   sc.updateProjectionMatrix();
   sun.shadow.needsUpdate = true;
   persp.near = Math.max(ext / 400, 0.05); persp.far = ext * 60; persp.updateProjectionMatrix();
+  ortho.near = -ext * 30; ortho.far = ext * 30; ortho.updateProjectionMatrix();
 }
-function fit(dir, seconds = 0.55) {
-  // Frame the box's 8 corners tightly as seen from `dir` (same approach as the Topolabs studio scene).
-  if (boundsDirty) updateBounds();
-  if (bounds.isEmpty()) return;
-  const look = (dir || camera.position.clone().sub(controls.target)).clone().normalize();
-  const up = Math.abs(look.z) > 0.999 ? new THREE.Vector3(0, 1, 0) : new THREE.Vector3(0, 0, 1);
-  const right = new THREE.Vector3().crossVectors(up, look).normalize();
-  const camUp = new THREE.Vector3().crossVectors(look, right).normalize();
-  const c = bounds.getCenter(new THREE.Vector3());
-  let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity, near = -Infinity;
-  for (let i = 0; i < 8; i++) {
-    const p = new THREE.Vector3(i & 1 ? bounds.max.x : bounds.min.x, i & 2 ? bounds.max.y : bounds.min.y,
-      i & 4 ? bounds.max.z : bounds.min.z).sub(c);
-    const px = p.dot(right), py = p.dot(camUp);
-    x0 = Math.min(x0, px); x1 = Math.max(x1, px); y0 = Math.min(y0, py); y1 = Math.max(y1, py);
-    near = Math.max(near, p.dot(look));
-  }
-  const target = c.clone().addScaledVector(right, (x0 + x1) / 2).addScaledVector(camUp, (y0 + y1) / 2);
-  const [w, h] = sizeOf();
-  const t = Math.tan(THREE.MathUtils.degToRad(FOV / 2));
-  const span = Math.max((y1 - y0) * 1.12, (x1 - x0) * 1.12 / (w / h));
-  const d = span / 2 / t + near * 0.5;
-  flyTo(target.clone().addScaledVector(look, d), target, seconds);
-}
-const VIEWS = { iso: [28, -58], front: [0, -90], side: [0, 0], top: [89.9, -90] };
-function view(name) {
-  if (name === 'fit') return fit(null);
-  if (name === 'ortho') return useCamera(camera !== ortho);
-  const [e, a] = VIEWS[name];
-  fit(sphericalDir(e, a));
-}
-document.querySelectorAll('#toolbar button').forEach(b => b.addEventListener('click', () => view(b.dataset.view)));
-renderer.domElement.addEventListener('dblclick', () => fit(null));
-addEventListener('keydown', ev => {
-  const k = ev.key.toLowerCase();
-  if (k === 'f') fit(null); else if (k === 'o') view('ortho');
-  else if (k === '1') view('front'); else if (k === '3') view('side'); else if (k === '7') view('top');
-  else if (k === '0') view('iso');
-});
-
-// ── axis gizmo (click an axis to look along it) ───────────────────────
-const gz = document.getElementById('gizmo'), gctx = gz.getContext('2d');
-let gizmoHits = [];
-function drawGizmo() {
-  const W = gz.width, c = W / 2, r = W * 0.34;
-  gctx.clearRect(0, 0, W, W);
-  gctx.beginPath(); gctx.arc(c, c, W * 0.47, 0, Math.PI * 2);
-  gctx.fillStyle = theme.dark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.04)'; gctx.fill();
-  const inv = camera.quaternion.clone().invert();
-  const axes = [['X', [1, 0, 0], '#e5484d'], ['Y', [0, 1, 0], '#2bb673'], ['Z', [0, 0, 1], '#4c8dff']];
-  const items = [];
-  for (const [n, v, col] of axes) for (const s of [1, -1]) {
-    const p = new THREE.Vector3(...v).multiplyScalar(s).applyQuaternion(inv);
-    items.push({ n: s > 0 ? n : '', col, x: c + p.x * r, y: c - p.y * r, z: p.z, pos: s > 0, dir: new THREE.Vector3(...v).multiplyScalar(s) });
-  }
-  items.sort((a, b) => a.z - b.z);
-  gizmoHits = items;
-  for (const it of items) {
-    if (it.pos) { gctx.strokeStyle = it.col; gctx.lineWidth = 4; gctx.beginPath(); gctx.moveTo(c, c); gctx.lineTo(it.x, it.y); gctx.stroke(); }
-    gctx.beginPath(); gctx.arc(it.x, it.y, it.pos ? 17 : 11, 0, Math.PI * 2);
-    gctx.fillStyle = it.pos ? it.col : it.col + '55'; gctx.fill();
-    if (it.n) { gctx.fillStyle = '#fff'; gctx.font = 'bold 20px Segoe UI, sans-serif'; gctx.textAlign = 'center'; gctx.textBaseline = 'middle'; gctx.fillText(it.n, it.x, it.y + 1); }
-  }
-}
-gz.addEventListener('click', ev => {
-  const rect = gz.getBoundingClientRect(), k = gz.width / rect.width;
-  const x = (ev.clientX - rect.left) * k, y = (ev.clientY - rect.top) * k;
-  let best = null, bd = 1e9;
-  for (const it of gizmoHits) { const d = Math.hypot(it.x - x, it.y - y); if (d < bd) { bd = d; best = it; } }
-  if (best && bd < 24) {
-    const dir = best.dir.clone();
-    if (Math.abs(dir.z) > 0.99) dir.set(0, -0.001, Math.sign(dir.z));
-    fit(dir);
-  }
+const nav = createNavigation({
+  renderer, stage, persp, ortho, fov: FOV,
+  getBounds: () => { if (boundsDirty) updateBounds(); return bounds; },
+  gizmo: document.getElementById('gizmo'),
+  buttons: { ortho: document.getElementById('cam-ortho'), reset: document.getElementById('cam-reset') },
+  feedback: document.getElementById('feedback'),
 });
 
 // ── loop ──────────────────────────────────────────────────────────────
 function resize() {
   const [w, h] = sizeOf();
   renderer.setSize(w, h);
-  persp.aspect = w / h; persp.updateProjectionMatrix();
-  if (camera === ortho) {
-    const half = (ortho.top - ortho.bottom) / 2;
-    ortho.left = -half * w / h; ortho.right = half * w / h; ortho.updateProjectionMatrix();
-  }
+  nav.resize();
   needs = true;
 }
 new ResizeObserver(resize).observe(stage);
 resize();
-const ease = t => t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
 let prev = performance.now();
 renderer.setAnimationLoop(() => {
   const now = performance.now(), dt = Math.min((now - prev) / 1000, 0.05);
   prev = now;
-  if (fly) {
-    fly.t += dt;
-    const k = ease(Math.min(1, fly.t / fly.T));
-    camera.position.lerpVectors(fly.p0, fly.p1, k);
-    controls.target.lerpVectors(fly.c0, fly.c1, k);
-    if (camera === ortho) { camera.zoom = fly.z0 + (1 - fly.z0) * k; setOrthoFrustumFrom(fly.p1, fly.c1); camera.updateProjectionMatrix(); }
-    if (fly.t >= fly.T) fly = null;
-    needs = true;
-  }
-  if (controls.update()) needs = true;
   if (boundsDirty) { updateBounds(); needs = true; }
+  if (nav.update(dt)) needs = true;
   if (!needs) return;
   needs = false;
-  renderer.render(scene, camera);
-  drawGizmo();
+  renderer.render(scene, nav.camera);
+  nav.drawGizmo();
 });
-function setOrthoFrustumFrom(p, c) {
-  const [w, h] = sizeOf();
-  const half = p.distanceTo(c) * Math.tan(THREE.MathUtils.degToRad(FOV / 2));
-  ortho.left = -half * w / h; ortho.right = half * w / h; ortho.top = half; ortho.bottom = -half;
-}
-
 // ── command dispatch ─────────────────────────────────────────────────
 function applyTheme(t) {
-  theme = t;
+  nav.setTheme(t);
   const r = document.documentElement.style;
   for (const k of ['bg', 'bg2', 'text', 'muted', 'surface', 'border', 'accent']) if (t[k]) r.setProperty('--' + k, t[k]);
   floor.material.opacity = t.dark ? 0.42 : 0.2;
@@ -398,12 +265,11 @@ const OPS = {
   offset: a => { group(a.group).position.set(...a.xyz); },
   color: setColor,
   visible: a => { const o = objects.get(a.id); if (o) o.visible = a.on; boundsDirty = true; },
-  camera: a => {
-    const c = new THREE.Vector3(...a.center);
-    const p = c.clone().add(sphericalDir(a.elevation, a.azimuth).multiplyScalar(a.distance));
-    flyTo(p, c, a.animate ? 0.55 : 0);
+  camera: a => nav.lookFrom(a.center, a.distance, a.elevation, a.azimuth, a.animate ? FEEL.framingSeconds : 0),
+  fit: a => {
+    const s = a.animate === false ? 0 : FEEL.framingSeconds;
+    if (a.elevation !== undefined) nav.fitFrom(a.elevation, a.azimuth, s); else nav.fit(undefined, undefined, s);
   },
-  fit: a => fit(a.elevation !== undefined ? sphericalDir(a.elevation, a.azimuth) : null, a.animate === false ? 0 : 0.55),
 };
 window.S = {
   run(cmds) {
@@ -414,7 +280,8 @@ window.S = {
     return true;
   },
   snapshot() {
-    renderer.render(scene, camera);
+    nav.update(0);
+    renderer.render(scene, nav.camera);
     const src = renderer.domElement, out = document.createElement('canvas');
     out.width = src.width; out.height = src.height;
     const g = out.getContext('2d');
@@ -425,7 +292,7 @@ window.S = {
   },
   debug() {
     if (boundsDirty) updateBounds();
-    return JSON.stringify({ size: sizeOf(), target: controls.target.toArray(), cam: camera.position.toArray(),
+    return JSON.stringify({ size: sizeOf(), ...nav.debug(),
       bmin: bounds.min.toArray(), bmax: bounds.max.toArray() });
   },
   info() {
