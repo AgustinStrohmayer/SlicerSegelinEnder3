@@ -14,7 +14,6 @@ import pyqtgraph as pg
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (
     QAbstractItemView,
-    QDoubleSpinBox,
     QFileDialog,
     QFormLayout,
     QHBoxLayout,
@@ -43,6 +42,7 @@ from ....core.calibration import (
     temperature_from_resistance,
 )
 from ....core.cutting_physics import CutSetup, point_state, resistance_per_m, span_profile
+from ..numfield import NumField
 from .common import colors, style_plot
 
 STEPS = (
@@ -76,8 +76,8 @@ def _body(html: str) -> QLabel:
     return lab
 
 
-def _spin(lo: float, hi: float, val: float, dec: int, suffix: str) -> QDoubleSpinBox:
-    s = QDoubleSpinBox()
+def _spin(lo: float, hi: float, val: float, dec: int, suffix: str) -> NumField:
+    s = NumField()
     s.setRange(lo, hi)
     s.setDecimals(dec)
     s.setValue(val)

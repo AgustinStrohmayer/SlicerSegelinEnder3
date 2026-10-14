@@ -15,7 +15,6 @@ import pyqtgraph as pg
 from PyQt6.QtCore import QRectF, Qt, QTimer, pyqtSignal
 from PyQt6.QtWidgets import (
     QComboBox,
-    QDoubleSpinBox,
     QFormLayout,
     QFrame,
     QHBoxLayout,
@@ -34,6 +33,7 @@ from PyQt6.QtWidgets import (
 
 from ....core.cut_sim import SimResult, SliceResult
 from ....core.hotwire_rig import FoamBlock
+from ..numfield import NumField
 from .common import FOAM, REGIME, card, colors, diverging_cmap, fmt, heat_cmap, style_plot
 
 SPEEDS = (1.0, 2.0, 5.0, 10.0, 25.0)
@@ -279,14 +279,22 @@ class SimTab(QWidget):
         split.addWidget(left)
 
         right = QSplitter(Qt.Orientation.Vertical)
-        f, v = card("Layers along the wire")
+        f, v = card("Layers along the wire",
+                    "Cross-sections of the block at several positions (X) along the wire. Pick one to see it on "
+                    "the left. ✓ = the part comes free; mean edge below 0 = smaller than drawn.")
         self.layers = QListWidget()
         self.layers.currentRowChanged.connect(self._select)
         self.layers.setStyleSheet("QListWidget::item { padding: 1px 6px; min-height: 20px; }")
         self.layers.setMinimumHeight(110)
         v.addWidget(self.layers)
         right.addWidget(f)
-        f, v = card("Part, all layers (3D)", "Drag to orbit. Colour: deviation of the edge.")
+        f, v = card("Part, all layers (3D)",
+                    "Why do the layers differ? The wire runs across the whole block but isn't the same along its "
+                    "length: it is hottest in the middle and cooler near the arms, and when it touches the foam it "
+                    "bends back most in the middle. So each position along the wire is cut a little differently. "
+                    "Here every layer's outline is stacked along the wire as on the machine (the selected one is "
+                    "brighter); if they differ, the part comes out slightly barrel-shaped. Red edge: smaller than "
+                    "drawn; blue: bigger. Drag to orbit.")
         self.view3d = Layers3D(theme)
         v.addWidget(self.view3d, 1)
         right.addWidget(f)
@@ -308,7 +316,7 @@ class SimTab(QWidget):
         scroll.setWidget(body)
         v.addWidget(scroll, 1)
         right.addWidget(f)
-        right.setSizes([170, 300, 280])
+        right.setSizes([200, 330, 250])
         split.addWidget(right)
         split.setSizes([860, 380])
         lay.addWidget(split, 1)
@@ -323,8 +331,8 @@ class SimTab(QWidget):
         f = QFormLayout(w)
         f.setContentsMargins(0, 6, 0, 0)
 
-        def sp(lo: float, hi: float) -> QDoubleSpinBox:
-            s = QDoubleSpinBox()
+        def sp(lo: float, hi: float) -> NumField:
+            s = NumField(step=5)
             s.setRange(lo, hi)
             s.setDecimals(1)
             s.setSuffix(" mm")

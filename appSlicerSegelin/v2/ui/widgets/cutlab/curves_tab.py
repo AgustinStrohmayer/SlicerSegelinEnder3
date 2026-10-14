@@ -14,7 +14,6 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
     QCheckBox,
     QComboBox,
-    QDoubleSpinBox,
     QFileDialog,
     QFormLayout,
     QHBoxLayout,
@@ -40,6 +39,7 @@ from ....core.model_curves import (
     thermal2d_series,
     to_csv,
 )
+from ..numfield import NumField
 from .common import Job, card, colors, qcolor, style_plot
 
 PALETTE = ["#F28C28", "#5AA9E6", "#2BB673", "#E5484D", "#B07CE8", "#D6B656"]
@@ -109,8 +109,8 @@ class CurvesTab(QWidget):
         self.drives.setPlaceholderText("e.g. 1.0, 1.2, 1.4")
         self.drives.setToolTip("Currents (A) or voltages (V), comma separated.")
         self.from_meas = QPushButton("Use the measured drives")
-        self.v_lo = QDoubleSpinBox()
-        self.v_hi = QDoubleSpinBox()
+        self.v_lo = NumField(step=0.5)
+        self.v_hi = NumField(step=0.5)
         for sp, val in ((self.v_lo, 0.5), (self.v_hi, 12.0)):
             sp.setRange(0.05, 200)
             sp.setDecimals(2)

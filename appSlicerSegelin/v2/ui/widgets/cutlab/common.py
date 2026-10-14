@@ -12,7 +12,6 @@ import pyqtgraph as pg
 from PyQt6.QtCore import QObject, Qt, pyqtSignal
 from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import (
-    QDoubleSpinBox,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -22,6 +21,7 @@ from PyQt6.QtWidgets import (
 )
 
 from ...theming.tokens import ColorTokens, get_tokens
+from ..numfield import NumField
 
 # Regime colours: readable on both themes, distinct from the amber accent.
 REGIME = {
@@ -92,14 +92,31 @@ class KpiTile(QFrame):
         row.addStretch(1)
         self._hint = QLabel("")
         self._hint.setObjectName("KpiHint")
+        self._typ = QLabel("")
+        self._typ.setObjectName("KpiTypical")
+        self._typ.setWordWrap(True)
+        self._typ.setVisible(False)
         lay.addWidget(self._cap)
         lay.addLayout(row)
         lay.addWidget(self._hint)
+        lay.addWidget(self._typ)
 
     def set(self, value: str, hint: str = "", color: str | None = None) -> None:
         self._val.setText(value)
         self._hint.setText(hint)
         self._val.setStyleSheet(f"color: {color};" if color else "")
+
+    def set_hint(self, hint: str) -> None:
+        self._hint.setText(hint)
+
+    def set_typical(self, text: str, tip: str = "") -> None:
+        """A short 'typical: …' line under the value, so an odd setup shows at a glance."""
+        self._typ.setText(text)
+        self._typ.setToolTip(tip)
+        self._typ.setVisible(bool(text))
+
+    def value_text(self) -> str:
+        return self._val.text()
 
 
 def kpi_qss(c: ColorTokens) -> str:
@@ -110,6 +127,16 @@ def kpi_qss(c: ColorTokens) -> str:
     QLabel#KpiValue {{ color: {c.text}; font-size: 22px; font-weight: 600; }}
     QLabel#KpiUnit {{ color: {c.muted}; font-size: 12px; padding-bottom: 3px; }}
     QLabel#KpiHint {{ color: {c.muted}; font-size: 11px; }}
+    QLabel#KpiTypical {{ color: {c.muted}; font-size: 10px; font-style: italic; padding-top: 2px; }}
+    QLabel#GuideTypical {{ color: {c.muted}; font-size: 11px; font-style: italic; }}
+    QFrame#SummaryCard {{ background: {c.surface}; border: 1px solid {c.border}; border-radius: 12px; }}
+    QLabel#SummaryKey {{ color: {c.muted}; font-size: 12px; font-weight: 600; }}
+    QLabel#SummaryVal {{ color: {c.text}; font-size: 14px; }}
+    QLabel#SummaryBig {{ color: {c.text}; font-size: 18px; font-weight: 600; }}
+    QLabel#SaveNote {{ color: {c.muted}; font-size: 12px; background: {c.surface_alt}; border: 1px solid {c.border};
+        border-radius: 8px; padding: 8px 10px; }}
+    QLabel#SupplyReadout {{ color: {c.text}; font-size: 12px; background: {c.surface_alt}; border-radius: 6px;
+        padding: 6px 8px; }}
     QLabel#RegimeChip {{ border-radius: 11px; padding: 3px 12px; font-weight: 700; color: #111; }}
     QLabel#Advice {{ color: {c.text}; font-size: 12px; padding: 2px 4px; }}
     QFrame#LabCard {{ background: {c.surface}; border: 1px solid {c.border}; border-radius: 10px; }}
@@ -121,6 +148,25 @@ def kpi_qss(c: ColorTokens) -> str:
         border: none; border-bottom: 2px solid transparent; }}
     QWidget#CutLab QTabBar::tab:hover {{ color: {c.text}; }}
     QWidget#CutLab QTabBar::tab:selected {{ color: {c.text}; border-bottom: 2px solid {c.accent}; }}
+    QPushButton#ModeBtn {{ padding: 5px 16px; border-radius: 8px; }}
+    QPushButton#ModeBtn:checked {{ background: {c.accent}; color: {c.on_accent}; border-color: {c.accent}; }}
+    QLabel#Glossary {{ background: {c.surface_alt}; color: {c.text}; border: 1px solid {c.border};
+        border-radius: 10px; padding: 8px 10px; font-size: 12px; }}
+    QLabel#TabIntro {{ color: {c.muted}; font-size: 12px; padding: 0 4px; }}
+    QPushButton#GuideChip {{ padding: 6px 14px; border-radius: 14px; color: {c.muted}; }}
+    QPushButton#GuideChip:checked {{ background: {c.accent_soft}; color: {c.text}; border: 1px solid {c.accent}; }}
+    QFrame#GuideAsk {{ background: {c.surface}; border: 1px solid {c.border}; border-radius: 12px; }}
+    QLabel#GuideStepNo {{ color: {c.accent}; font-size: 11px; font-weight: 700; letter-spacing: 1px; }}
+    QLabel#GuideQuestion {{ color: {c.text}; font-size: 20px; font-weight: 600; }}
+    QLabel#GuideWhy {{ color: {c.text}; font-size: 13px; background: {c.accent_soft}; border-radius: 8px;
+        padding: 8px 10px; }}
+    QLabel#GuideBody {{ color: {c.text}; font-size: 13px; }}
+    QLabel#GuideHint {{ color: {c.muted}; font-size: 12px; }}
+    QLabel#GuideVerdict {{ color: {c.text}; font-size: 13px; padding: 4px 0; }}
+    QFrame#GuideCard {{ background: {c.surface_alt}; border: 1px solid {c.border}; border-radius: 10px; }}
+    QLabel#GuideCardCaption {{ color: {c.muted}; font-size: 11px; font-weight: 600; letter-spacing: 1px; }}
+    QLabel#GuideCardValue {{ color: {c.text}; font-size: 24px; font-weight: 600; }}
+    QLabel#GuideCardSub {{ color: {c.muted}; font-size: 12px; }}
     """
 
 
@@ -159,14 +205,8 @@ class ParamRow(QWidget):
         top.setSpacing(6)
         lab = QLabel(label)
         lab.setToolTip(tip)
-        self.spin = QDoubleSpinBox()
-        self.spin.setRange(lo, hi)
-        self.spin.setDecimals(decimals)
-        self.spin.setSingleStep(step)
-        self.spin.setSuffix(suffix)
-        self.spin.setKeyboardTracking(False)
-        self.spin.setMinimumWidth(96)
-        self.spin.setAlignment(Qt.AlignmentFlag.AlignRight)
+        self.spin = NumField(lo=lo, hi=hi, step=step, decimals=decimals, suffix=suffix)
+        self.spin.spin.setMinimumWidth(84)
         top.addWidget(lab, 1)
         top.addWidget(self.spin)
         self.slider = QSlider(Qt.Orientation.Horizontal)
@@ -210,6 +250,12 @@ class ParamRow(QWidget):
     def value(self) -> float:
         return self.spin.value()
 
+    def set_maximum(self, hi: float) -> None:
+        """Move the top of the range (e.g. the supply's maximum voltage); the value is clamped."""
+        self._hi = max(hi, self._lo * 1.01)
+        self.spin.setRange(self._lo, self._hi)
+        self.setValue(min(self.value(), self._hi))
+
     def setValue(self, x: float) -> None:
         self._sync = True
         self.spin.setValue(x)
@@ -223,6 +269,7 @@ class Job(QObject):
     done = pyqtSignal(object)
     failed = pyqtSignal(str)
     progress = pyqtSignal(float, str)
+    partial = pyqtSignal(object)  # intermediate results, for jobs that deliver in stages
 
     def __init__(self, fn: Callable[..., Any], *args: Any, parent: QObject | None = None, **kw: Any) -> None:
         super().__init__(parent)

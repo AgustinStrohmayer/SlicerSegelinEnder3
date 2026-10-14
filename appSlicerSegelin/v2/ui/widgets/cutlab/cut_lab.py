@@ -1,39 +1,70 @@
 """Cut Lab: interactive physics of the hot wire in the foam.
 
-Three tabs share one parameter panel and one row of live read-outs:
+It opens in **guided mode** (:mod:`.guided`): five short screens that ask one
+thing each — supply and wire, a test feed, the result, an optional
+calibration, the recommended settings. **Advanced mode**, one click away in
+the header, is the full lab described below; both modes edit the same
+parameter panel.
+
+Four tabs share one parameter panel and one row of live read-outs:
 
 * **Explore** — the wire's cross-section in the foam (melt radius, gap,
   kerf), the operating map (drive × feed) and the wire along its span;
+* **Curves** — kerf and friends against feed, from every model and the
+  measurements;
 * **Cut simulation** — a slicer-like replay of a G-code cut, slice by slice
   along the wire, with the part that actually comes out and its deviation;
 * **Calibration** — the step-by-step guide that fits the model to test cuts.
 
-The fast read-outs are computed on every edit; the operating map, the span
-profile and the simulation run on a background thread.
+Responsiveness: every edit recomputes the cheap read-outs at once (one
+point of the model, a few milliseconds even in CV mode). The heavy part — the
+contact speed and feed scan, the operating map, the profile along the wire —
+waits until the edits pause (``HEAVY_DEBOUNCE_MS``) and runs on one background
+worker, latest-wins: a newer edit makes a running job stop at its next stage
+and start over with the new parameters, so jobs never pile up.
+
+Persistence: the lab saves its profile (supply, wire, foam, calibration,
+measurements and the work settings chosen in guided mode) a moment after each
+change, and loads it on start-up — ``core.cut_profile.default_profile_path``,
+``datos/`` in portable mode. ``core.cut_profile.load_saved_cut_settings``
+reads the work feed and kerf compensation back for the main window.
+
+On the project's G-code (``linked``) the foam block is the project's: its
+width and offset (parameter panel) and its position and size (Cut simulation
+tab) go back through ``block_edited``; the wire span comes from the project's
+machine (:meth:`CutLab.set_rig`).
 """
 from __future__ import annotations
 
+import time
+from dataclasses import replace
+from datetime import datetime
 from pathlib import Path
 
 import numpy as np
-from PyQt6.QtCore import QStandardPaths, Qt
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtWidgets import (
+    QButtonGroup,
     QDialog,
     QFileDialog,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QMessageBox,
     QPushButton,
     QSplitter,
+    QStackedWidget,
     QTabWidget,
     QVBoxLayout,
     QWidget,
 )
 
 from ....core import cut_profile
+from ....core.cut_profile import WorkSettings, default_profile_path
 from ....core.cut_sim import simulate
 from ....core.cutting_physics import (
     CutSetup,
+    cold_resistance_ohm,
     contact_speed,
     operating_map,
     point_state,
@@ -41,14 +72,21 @@ from ....core.cutting_physics import (
     wire_time_constant_s,
 )
 from ....core.gcode_reader import Toolpath, parse_gcode
-from ....core.hotwire_rig import PRESETS, FoamBlock, fit_block
+from ....core.hotwire_rig import DEFAULT_PRESET, PRESETS, FoamBlock, HotWireRig, fit_block
 from ....core.thermal2d import solve_section
 from .calibration_tab import CalibrationTab
 from .common import REGIME, Job, KpiTile, colors, kpi_qss
 from .curves_tab import CurvesTab
 from .explore import REGIME_TEXT, ExploreTab, regime_of
+from .guided import GuidedPanel
 from .params import ParamsPanel
 from .simulate_tab import SimTab
+from .typical import feed_scan, recommend, typical
+
+HEAVY_DEBOUNCE_MS = 150   # the heavy plots wait for the edits to pause this long
+AUTOSAVE_MS = 1200        # the profile is saved this long after the last change
+PROFILE_SPEEDS = np.geomspace(0.05, 200.0, 30)  # along-the-wire profile for the UI (the cut simulation uses more)
+PROFILE_NODES = 161
 
 HELP = """<h3>How the Cut Lab models the cut</h3>
 <p><b>Wire.</b> The current heats the wire (I²R, with R rising with temperature). It loses heat to the air by
@@ -79,6 +117,36 @@ cuts, so the predicted kerf becomes your machine's.</p>
 plan are in <i>docs/fisica-del-corte.md</i> in the repository.</p>"""
 
 
+GLOSSARY = """<table cellspacing="0" cellpadding="3">
+<tr><td><b>Wire in air</b></td><td>How hot the wire gets on its own, in free air, at this current.</td></tr>
+<tr><td><b>Wire in foam</b></td><td>How hot it stays while cutting at the probe feed. Lower than in air: the foam
+takes heat from it as it melts.</td></tr>
+<tr><td><b>Radius of incidence</b></td><td>How far ahead of the wire's centre the foam has already melted. Bigger
+than the wire's radius means a gap of hot gas: the wire never touches the foam.</td></tr>
+<tr><td><b>Kerf</b></td><td>The width of the slot the wire leaves. The part comes out half of it smaller on each
+side.</td></tr>
+<tr><td><b>Regime</b></td><td>What kind of cut it is: <i>non-contact</i> (clean), <i>over-melting</i> (clean but
+wide), <i>contact</i> (the wire touches, drags and bends) or <i>stall</i> (too cold to cut).</td></tr>
+<tr><td><b>Max non-contact feed</b></td><td>The fastest speed that still cuts without touching. Stay below
+it.</td></tr>
+<tr><td><b>Bow at centre</b></td><td>How far the middle of the wire bends back behind its ends. 0 when it cuts
+without touching.</td></tr>
+<tr><td><b>Wire response</b></td><td>How quickly the wire heats up or cools down when something changes; wait about
+three times this before cutting.</td></tr>
+</table>"""
+
+TAB_INTRO = {
+    "explore": "<b>Explore</b> — change any setting on the left and watch the wire react. Left: the wire seen from "
+               "its end as it melts through the foam. Top right: every current × speed at once (click to try one). "
+               "Bottom right: the wire from clamp to clamp.",
+    "curves": "<b>Curves</b> — how the slot width (and more) changes with speed, for several currents, from each "
+              "model and from your own measurements.",
+    "sim": "<b>Cut simulation</b> — replays a G-code through the foam and shows the part that comes out. Press "
+           "<i>Run cut simulation</i>, then pick a layer on the right to see that cross-section.",
+    "calib": "<b>Calibration</b> — six short steps to fit the model to test cuts from your own machine.",
+}
+
+
 def demo_gcode() -> str:
     """A NACA 0012 rib, 100 mm chord, with a lead-in: something to look at before loading a G-code."""
     c = 100.0
@@ -92,15 +160,16 @@ def demo_gcode() -> str:
     return "\n".join(lines) + "\n"
 
 
-def _profile_path() -> Path:
-    from ....portable import data_dir
-
-    base = data_dir() or QStandardPaths.writableLocation(QStandardPaths.StandardLocation.AppConfigLocation)
-    return Path(base or Path.home()) / "cut_lab_profile.json"
-
-
 class CutLab(QWidget):
-    def __init__(self, parent: QWidget | None = None, theme: str = "dark", *, load_saved: bool = True) -> None:
+    block_edited = pyqtSignal(object)  # FoamBlock, after a user edit of the project's block
+    work_speed_chosen = pyqtSignal(float, float)  # saved work settings: feed (mm/s), kerf (mm, full width)
+    work_saved = pyqtSignal(object)  # WorkSettings, after "Save and use for the project"
+    close_requested = pyqtSignal()   # the guided mode is done: the host window may close
+
+    def __init__(self, parent: QWidget | None = None, theme: str = "dark", *, load_saved: bool = True,
+                 profile_path: str | Path | None = None) -> None:
+        """``load_saved``: load the default profile on start and keep it saved (off in tests).
+        ``profile_path``: where (default: :func:`core.cut_profile.default_profile_path`)."""
         super().__init__(parent)
         self.theme = theme
         self._c = colors(theme)
@@ -110,12 +179,27 @@ class CutLab(QWidget):
         self.toolpath: Toolpath = parse_gcode("")
         self.block = FoamBlock()
         self.source_name = ""
+        self.linked = False  # showing the project's G-code: block edits belong to the project
         self._token = 0
         self._heavy: Job | None = None
         self._sim_job: Job | None = None
         self._hifi_job: Job | None = None
         self._profile = None
-        self.project_provider = None  # callable returning (gcode_text, name) or None
+        self.project_provider = None  # callable returning (gcode_text, name, block) or None
+        self.persist = load_saved
+        self.profile_path = Path(profile_path) if profile_path is not None else default_profile_path()
+        self.work: WorkSettings | None = None
+        self._heavy_pending = False
+        self._last_vc: float | None = None
+        self.timings: dict[str, float] = {}  # ms of the last fast update / heavy stages (for profiling)
+        self._heavy_timer = QTimer(self)
+        self._heavy_timer.setSingleShot(True)
+        self._heavy_timer.setInterval(HEAVY_DEBOUNCE_MS)
+        self._heavy_timer.timeout.connect(self._launch_heavy)
+        self._save_timer = QTimer(self)
+        self._save_timer.setSingleShot(True)
+        self._save_timer.setInterval(AUTOSAVE_MS)
+        self._save_timer.timeout.connect(self.save_default)
 
         root = QVBoxLayout(self)
         root.setContentsMargins(8, 8, 8, 8)
@@ -130,11 +214,31 @@ class CutLab(QWidget):
         rv.setContentsMargins(0, 0, 0, 0)
         rv.setSpacing(8)
         rv.addLayout(self._kpis())
+        arow = QHBoxLayout()
         self.advice = QLabel("")
         self.advice.setObjectName("Advice")
         self.advice.setWordWrap(True)
         self.advice.setTextFormat(Qt.TextFormat.RichText)
-        rv.addWidget(self.advice)
+        arow.addWidget(self.advice, 1)
+        self.glossary_btn = QPushButton("ⓘ  What do these numbers mean?")
+        self.glossary_btn.setProperty("role", "ghost")
+        self.glossary_btn.setCheckable(True)
+        arow.addWidget(self.glossary_btn, 0, Qt.AlignmentFlag.AlignTop)
+        rv.addLayout(arow)
+        self.glossary = QLabel(GLOSSARY)
+        self.glossary.setObjectName("Glossary")
+        self.glossary.setWordWrap(True)
+        self.glossary.setTextFormat(Qt.TextFormat.RichText)
+        self.glossary.setVisible(False)
+        self.glossary_btn.setMinimumWidth(self.glossary_btn.sizeHint().width() + 24)
+        self.glossary_btn.toggled.connect(self.glossary.setVisible)
+        self.glossary_btn.toggled.connect(lambda on: self.glossary_btn.setText(
+            "Hide the explanations" if on else "ⓘ  What do these numbers mean?"))
+        rv.addWidget(self.glossary)
+        self.tab_intro = QLabel("")
+        self.tab_intro.setObjectName("TabIntro")
+        self.tab_intro.setWordWrap(True)
+        self.tab_intro.setTextFormat(Qt.TextFormat.RichText)
         self.tabs = QTabWidget()
         self.explore = ExploreTab(theme)
         self.sim = SimTab(theme)
@@ -144,11 +248,18 @@ class CutLab(QWidget):
         self.tabs.addTab(self.curves, "Curves")
         self.tabs.addTab(self.sim, "Cut simulation")
         self.tabs.addTab(self.calib, "Calibration")
+        rv.addWidget(self.tab_intro)
         rv.addWidget(self.tabs, 1)
         split.addWidget(right)
         split.setSizes([330, 1200])
         split.setStretchFactor(1, 1)
-        root.addWidget(split, 1)
+
+        self.guided = GuidedPanel(theme, self.params)
+        self.guided.save_path_text = str(self.profile_path)
+        self.pages = QStackedWidget()  # guided | advanced; both drive self.params
+        self.pages.addWidget(self.guided)
+        self.pages.addWidget(split)
+        root.addWidget(self.pages, 1)
 
         self.params.changed.connect(self._recompute)
         self.explore.picked.connect(self._picked)
@@ -163,12 +274,22 @@ class CutLab(QWidget):
         self.calib.preview_gcode.connect(self._preview_test)
         self.tabs.currentChanged.connect(self._tab_shown)
         self.calib.measurements_changed.connect(self._refresh_curves)
+        self.calib.measurements_changed.connect(
+            lambda: self.guided.set_measurement_count(len(self.calib.measurements)))
+        self.calib.measurements_changed.connect(self._schedule_save)
+        self.guided.advanced_requested.connect(self.show_advanced)
+        self.guided.simulate_requested.connect(self._guided_simulate)
+        self.guided.save_requested.connect(self.save_work)
+        self.mode_group.idClicked.connect(lambda i: self.show_advanced() if i else self.show_guided())
 
-        self.params.set_span(PRESETS["Ender-3 (long arms)"].wire_span)
+        self.params.set_span(PRESETS[DEFAULT_PRESET].wire_span)
         if load_saved:
             self._load_saved()
         self.load_text(demo_gcode(), "Demo — NACA 0012 rib")
+        self._tab_shown(0)
+        self.show_guided()
         self._recompute()
+        self._save_timer.stop()  # nothing changed yet
 
     # ── header & KPIs ─────────────────────────────────────────────────
     def _header(self) -> QHBoxLayout:
@@ -178,6 +299,20 @@ class CutLab(QWidget):
         self.source = QLabel("")
         self.source.setObjectName("CardSub")
         row.addWidget(title)
+        row.addSpacing(10)
+        self.mode_group = QButtonGroup(self)
+        self.mode_btns: list[QPushButton] = []
+        for i, (text, tip) in enumerate((
+                ("Guided", "Step by step: one question per screen, with the result next to it."),
+                ("Advanced", "The full lab: every parameter, the operating map, curves, the cut simulation "
+                             "and the calibration."))):
+            b = QPushButton(text)
+            b.setObjectName("ModeBtn")
+            b.setCheckable(True)
+            b.setToolTip(tip)
+            self.mode_group.addButton(b, i)
+            self.mode_btns.append(b)
+            row.addWidget(b)
         row.addSpacing(10)
         row.addWidget(self.source, 1)
         self.project_btn = QPushButton("Use current project")
@@ -192,9 +327,13 @@ class CutLab(QWidget):
             row.addWidget(b)
         return row
 
-    def _kpis(self) -> QHBoxLayout:
-        row = QHBoxLayout()
-        row.setSpacing(8)
+    def _kpis(self) -> QGridLayout:
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(8)
+        grid.setVerticalSpacing(8)
+        self.k_cur = KpiTile("Current", "A", "Current through the wire (CV: what the wire draws at the set voltage; "
+                                             "the supply holds its current limit if the wire would draw more).")
+        self.k_pow = KpiTile("Power", "W", "Electrical power heating the wire (I²·R, R at the wire's temperature).")
         self.k_air = KpiTile("Wire in air", "°C", "Steady temperature of the wire in free air.")
         self.k_foam = KpiTile("Wire in foam", "°C", "Temperature of the wire while it cuts at the probe feed.")
         self.k_rm = KpiTile("Radius of incidence", "mm",
@@ -206,39 +345,120 @@ class CutLab(QWidget):
         self.k_vc = KpiTile("Max non-contact feed", "mm/s", "Fastest feed that still cuts without touching.")
         self.k_bow = KpiTile("Bow at centre", "mm", "Lag of the wire's middle behind its ends at the probe feed.")
         self.k_tau = KpiTile("Wire response", "s", "Thermal time constant of the wire (how fast it heats/cools).")
-        for k in (self.k_air, self.k_foam, self.k_rm, self.k_kerf, self.k_reg, self.k_vc, self.k_bow, self.k_tau):
-            row.addWidget(k, 1)
-        return row
+        for k, tile in enumerate((self.k_cur, self.k_pow, self.k_air, self.k_foam, self.k_tau,
+                                  self.k_rm, self.k_kerf, self.k_reg, self.k_vc, self.k_bow)):
+            grid.addWidget(tile, k // 5, k % 5)
+        for c in range(5):
+            grid.setColumnStretch(c, 1)
+        return grid
+
+    # ── guided / advanced ─────────────────────────────────────────────
+    @property
+    def guided_mode(self) -> bool:
+        return self.pages.currentWidget() is self.guided
+
+    def show_guided(self) -> None:
+        self.mode_btns[0].setChecked(True)
+        self.pages.setCurrentWidget(self.guided)
+
+    def show_advanced(self, tab: str = "") -> None:
+        """Advanced mode, optionally on a tab: "explore", "curves", "sim" or "calib"."""
+        self.mode_btns[1].setChecked(True)
+        self.pages.setCurrentIndex(1)
+        w = {"explore": self.explore, "curves": self.curves, "sim": self.sim, "calib": self.calib}.get(tab)
+        if w is not None:
+            self.tabs.setCurrentWidget(w)
+
+    def _guided_simulate(self) -> None:
+        self.show_advanced("sim")
+        self.run_simulation()
 
     # ── live model ────────────────────────────────────────────────────
     def setup(self) -> CutSetup:
         return self.params.setup()
 
     def _recompute(self) -> None:
+        """Every edit: the cheap read-outs now, the heavy part once the edits pause."""
+        t0 = time.perf_counter()
+        self._token += 1
+        width, offset = self.params.bw.value(), self.params.boff.value()
+        if (width, offset) != (self.block.width_x, self.block.x_offset):
+            self.block = replace(self.block, width_x=width, x_offset=offset)
+            if self.linked:
+                self.block_edited.emit(self.block)
         s = self.setup()
         v = self.params.probe_speed()
         st = point_state(s, v)
         reg = regime_of(st, s)
-        unit_drive = f"{float(st.current_a):.2f} A" if s.mode == "voltage" else f"{s.current_a:.2f} A"
-        self.k_air.set(f"{float(st.t_air_c):.0f}", f"{unit_drive} · {float(st.power_w):.1f} W")
+        typ = typical(s)
+        i, u, p = float(st.current_a), float(st.voltage_v), float(st.power_w)
+        lim = bool(st.limited)
+        warn = self._c.warning
+        if s.mode == "voltage":
+            self.k_cur.set(f"{i:.2f}", f"at {s.voltage_v:.1f} V" + (" · on the current limit" if lim else ""),
+                           warn if lim else None)
+        else:
+            self.k_cur.set(f"{i:.2f}", f"needs {u:.1f} V" + (" · supply at its max" if lim else ""),
+                           warn if lim else None)
+        self.k_cur.set_typical(typ.current, typ.tip["current"])
+        self.k_pow.set(f"{p:.1f}", f"{p / max(s.span_mm * 1e-3, 1e-9):.0f} W/m of wire")
+        self.k_pow.set_typical(typ.power, typ.tip["power"])
+        self.k_air.set(f"{float(st.t_air_c):.0f}", "in free air",
+                       self._c.danger if float(st.t_air_c) > s.wire.max_temp_c else None)
+        self.k_air.set_typical(typ.t_air, typ.tip["t_air"])
         self.k_foam.set(f"{float(st.t_foam_c):.0f}", f"{float(st.t_foam_c - st.t_air_c):+.0f} °C vs air")
+        self.k_foam.set_typical(typ.t_foam, typ.tip["t_foam"])
         self.k_rm.set(f"{float(st.r_m_mm):.3f}",
                       f"gap {float(st.gap_mm) * 1000:.0f} µm" if float(st.gap_mm) < 0.1 else f"gap {float(st.gap_mm):.2f} mm")
+        self.k_rm.set_typical(typ.r_m, typ.tip["r_m"])
         self.k_kerf.set(f"{float(st.kerf_mm):.2f}", f"part −{float(st.kerf_mm) / 2:.2f} mm per side")
+        self.k_kerf.set_typical(typ.kerf, typ.tip["kerf"])
         self.k_reg.set(REGIME_TEXT[reg].split(" —")[0], REGIME_TEXT[reg].split("— ")[-1] if "—" in REGIME_TEXT[reg]
                        else "gap of hot gas", REGIME[reg])
         tau = wire_time_constant_s(s, float(st.t_air_c))
         self.k_tau.set(f"{tau:.1f}", f"~{3 * tau:.0f} s to settle")
+        if self.k_vc.value_text() == "—" and self._last_vc is None:
+            self.k_vc.set("…", "computing")
+        else:
+            self.k_vc.set_hint("updating…")
+        self.k_bow.set_hint("updating…")
+        self._supply_readout(s, st)
         self.explore.incidence.show_state(st, s, v)
         self.explore.mark_stale()
-        self._refresh_curves()
         drive = s.current_a if s.mode == "current" else s.voltage_v
         self.explore.map.set_point(drive, v)
         self._advise(st, s, v, None)
-        self._launch_heavy(s, v)
+        self.guided.refresh(st, s, v)
+        self._heavy_timer.start()
+        self._schedule_save()
+        self.timings["fast_ms"] = 1000 * (time.perf_counter() - t0)
+
+    def _supply_readout(self, s: CutSetup, st) -> None:  # type: ignore[no-untyped-def]
+        c = self._c
+        i, u, p = float(st.current_a), float(st.voltage_v), float(st.power_w)
+        r_cold = cold_resistance_ohm(s)
+        if s.mode == "voltage":
+            txt = f"<b>{s.voltage_v:.1f} V</b> → the wire draws <b>{i:.2f} A</b>, <b>{p:.1f} W</b>"
+            if bool(st.limited):
+                txt += (f"<br><span style='color:{c.warning}'>On the {s.current_limit_a:.1f} A current limit: the "
+                        f"supply drops to {u:.1f} V (CC).</span>")
+        else:
+            txt = f"<b>{s.current_a:.2f} A</b> → needs <b>{u:.1f} V</b>, <b>{p:.1f} W</b>"
+            if bool(st.limited):
+                txt += (f"<br><span style='color:{c.warning}'>The supply tops out at {s.voltage_limit_v:.0f} V: "
+                        f"only {i:.2f} A flow (CV).</span>")
+        txt += (f"<br><span style='color:{c.muted}'>Hot wire {float(st.voltage_v) / max(i, 1e-9) - s.lead_resistance_ohm:.2f} Ω"
+                f" · cold {r_cold:.2f} Ω + leads {s.lead_resistance_ohm:.2f} Ω</span>")
+        self.params.set_supply_readout(txt)
+        self.params.set_wire_info(f"Cold resistance between the clamps: {r_cold:.3f} Ω "
+                                  f"(ρ·L/A, {s.span_mm:.0f} mm, Ø {s.diameter_mm:.2f} mm). Or type the one you "
+                                  "measured:")
 
     def _tab_shown(self, i: int) -> None:
         w = self.tabs.widget(i)
+        key = {id(self.explore): "explore", id(self.curves): "curves", id(self.sim): "sim",
+               id(self.calib): "calib"}.get(id(w), "")
+        self.tab_intro.setText(TAB_INTRO.get(key, ""))
         if w is self.calib:
             self.calib.refresh()
         elif w is self.curves:
@@ -248,36 +468,93 @@ class CutLab(QWidget):
         if self.tabs.currentWidget() is self.curves:
             self.curves.refresh()
 
-    def _launch_heavy(self, s: CutSetup, v: float) -> None:
-        self._token += 1
+    def _axis_limit(self) -> float | None:
+        lim = self.params.limits()
+        return min(lim.vmax_y, lim.vmax_z) * lim.feed_scale if lim.honor_axis_limits else None
+
+    def _launch_heavy(self) -> None:
+        """Start the background job for the latest parameters (or flag it, if one is still running)."""
+        self._refresh_curves()  # debounced with the heavy part: a few model calls, on the UI thread
+        if self._heavy is not None:
+            self._heavy_pending = True  # the running job sees the new token, stops, and we start over
+            return
+        self._heavy_pending = False
         token = self._token
+        s, v = self.setup(), self.params.probe_speed()
         s_profile = s.with_(block_width_mm=self.params.bw.value(), block_offset_mm=self.params.boff.value())
+        vmax_axis = self._axis_limit()
+        job = Job(lambda: None, parent=self)
 
-        def work() -> dict:
-            return {"token": token, "vc": contact_speed(s), "map": operating_map(s),
-                    "profile": span_profile(s_profile), "v": v, "setup": s}
+        def stale() -> bool:
+            return token != self._token
 
-        job = Job(work, parent=self)
+        def work() -> dict | None:
+            t0 = time.perf_counter()
+            vc = contact_speed(s)
+            scan = feed_scan(s)
+            rec = recommend(s, vc, vmax_axis)
+            job.partial.emit({"token": token, "stage": "vc", "vc": vc, "scan": scan, "rec": rec, "v": v,
+                              "setup": s, "ms": 1000 * (time.perf_counter() - t0)})
+            if stale():
+                return None
+            t1 = time.perf_counter()
+            m = operating_map(s)
+            job.partial.emit({"token": token, "stage": "map", "map": m, "v": v, "setup": s,
+                              "ms": 1000 * (time.perf_counter() - t1)})
+            if stale():
+                return None
+            t2 = time.perf_counter()
+            prof = span_profile(s_profile, speeds=PROFILE_SPEEDS, nodes=PROFILE_NODES)
+            return {"token": token, "stage": "profile", "profile": prof, "v": v, "setup": s, "vc": vc,
+                    "ms": 1000 * (time.perf_counter() - t2), "total_ms": 1000 * (time.perf_counter() - t0)}
+
+        job._fn = work
+        job.partial.connect(self._heavy_partial)
         job.done.connect(self._heavy_done)
-        job.failed.connect(lambda msg: self.advice.setText(f"<span style='color:{self._c.danger}'>{msg}</span>"))
+        job.failed.connect(self._heavy_failed)
         self._heavy = job
-        self.k_vc.set("…", "computing")
         job.start()
 
-    def _heavy_done(self, out: dict) -> None:
+    def _heavy_partial(self, out: dict) -> None:
         if out["token"] != self._token:
             return  # a newer edit is on its way
-        self._last_profile = out["profile"]
-        self.explore.map.set_map(out["map"])
         s, v = out["setup"], out["v"]
-        self.explore.map.set_point(s.current_a if s.mode == "current" else s.voltage_v, v)
-        self.explore.along.show_profile(out["profile"], v)
-        vc = out["vc"]
-        self.k_vc.set(f"{vc:.1f}" if vc > 0 else "—", "go slower to avoid contact" if v > vc else
-                      f"you're at {100 * v / max(vc, 1e-9):.0f} %")
-        at = out["profile"].at(v, self.params.boff.value())
-        self.k_bow.set(f"{at['bow_mm']:.2f}", "no drag" if at["bow_mm"] < 1e-3 else "wire drags behind")
-        self._advise(point_state(s, v), s, v, vc)
+        self.timings[f"{out['stage']}_ms"] = out["ms"]
+        if out["stage"] == "vc":
+            vc = out["vc"]
+            self._last_vc = vc
+            self.k_vc.set(f"{vc:.1f}" if vc > 0 else "—", "go slower to avoid contact" if v > vc else
+                          f"you're at {100 * v / max(vc, 1e-9):.0f} %")
+            win = out["scan"]["clean"]
+            self.k_vc.set_typical(f"clean {win[0]:.1f}–{win[1]:.1f} mm/s (model)" if win else "no clean feed (model)",
+                                  "Model estimate: the feeds that cut without contact and without over-melting at "
+                                  "this drive.")
+            self._advise(point_state(s, v), s, v, vc)
+            self.guided.set_scan(vc, out["scan"], out["rec"], v)
+        elif out["stage"] == "map":
+            self.explore.map.set_map(out["map"])
+            self.explore.map.set_point(s.current_a if s.mode == "current" else s.voltage_v, v)
+
+    def _heavy_done(self, out: dict | None) -> None:
+        self._heavy = None
+        if out is not None and out["token"] == self._token:
+            self.timings["profile_ms"] = out["ms"]
+            self.timings["heavy_total_ms"] = out["total_ms"]
+            self._last_profile = out["profile"]
+            v = out["v"]
+            self.explore.along.show_profile(out["profile"], v)
+            at = out["profile"].at(v, self.params.boff.value())
+            self.k_bow.set(f"{at['bow_mm']:.2f}", "no drag" if at["bow_mm"] < 1e-3 else "wire drags behind")
+            self.guided.set_profile(out["profile"], v)
+        if self._heavy_pending or (out is None or out["token"] != self._token):
+            if not self._heavy_timer.isActive():
+                self._launch_heavy()
+
+    def _heavy_failed(self, msg: str) -> None:
+        self._heavy = None
+        self.advice.setText(f"<span style='color:{self._c.danger}'>{msg}</span>")
+        if self._heavy_pending and not self._heavy_timer.isActive():
+            self._launch_heavy()
 
     def _advise(self, st, s: CutSetup, v: float, vc: float | None) -> None:  # type: ignore[no-untyped-def]
         reg = regime_of(st, s)
@@ -310,18 +587,34 @@ class CutLab(QWidget):
         self.params.set_calibration(eta, kappa)
 
     # ── sources ───────────────────────────────────────────────────────
-    def load_text(self, text: str, name: str) -> None:
+    def load_text(self, text: str, name: str, block: FoamBlock | None = None) -> None:
+        """Load a G-code. With ``block`` (the project's) the lab is linked to the project;
+        without, it fits a block of its own to the G-code."""
         self.toolpath = parse_gcode(text)
         self.source_name = name
-        if self.toolpath.moves:
-            w = self.params.bw.value()
-            self.block = fit_block(self.toolpath, width_x=w)
-            self.block = FoamBlock(length_y=self.block.length_y, height_z=self.block.height_z, width_x=w,
-                                   y0=self.block.y0, z0=self.block.z0, x_offset=self.params.boff.value())
-        self.sim.set_block(self.block)
+        self.linked = block is not None
+        if block is not None:
+            self.set_block(block)
+        elif self.toolpath.moves:
+            fit = fit_block(self.toolpath, width_x=self.params.bw.value())
+            self.block = replace(fit, x_offset=self.params.boff.value())
+            self.sim.set_block(self.block)
         tp = self.toolpath
         info = f"{len(tp.moves)} moves · {tp.cut_length:.0f} mm of path" if tp.moves else "no moves"
-        self.source.setText(f"{name} — {info}")
+        owner = "the project's block and machine" if self.linked else "a block fitted to this G-code"
+        self.source.setText(f"{name} — {info} · {owner}")
+
+    def set_block(self, block: FoamBlock) -> None:
+        """Show ``block`` (from the project) without echoing it back."""
+        self.block = block
+        self.sim.set_block(block)
+        if (self.params.bw.value(), self.params.boff.value()) != (block.width_x, block.x_offset):
+            self.params.set_block(block.width_x, block.x_offset)
+
+    def set_rig(self, rig: HotWireRig) -> None:
+        """The project's machine: the wire span between the arm tips."""
+        if abs(self.params.span.value() - rig.wire_span) > 0.05:
+            self.params.set_span(rig.wire_span)
 
     def load_file(self, path: str) -> None:
         with open(path, encoding="utf-8", errors="replace") as fh:
@@ -331,7 +624,7 @@ class CutLab(QWidget):
         path, _ = QFileDialog.getOpenFileName(self, "Open G-code", filter="G-code (*.gcode *.nc *.txt);;All files (*)")
         if path:
             self.load_file(path)
-            self.tabs.setCurrentWidget(self.sim)
+            self.show_advanced("sim")
 
     def set_project_provider(self, provider) -> None:  # type: ignore[no-untyped-def]
         self.project_provider = provider
@@ -343,17 +636,19 @@ class CutLab(QWidget):
         got = self.project_provider()
         if got:
             self.load_text(*got)
-            self.tabs.setCurrentWidget(self.sim)
+            self.show_advanced("sim")
 
     def _preview_test(self, text: str, name: str) -> None:
         self.load_text(text, name)
-        self.tabs.setCurrentWidget(self.sim)
+        self.show_advanced("sim")
         self.run_simulation()
 
     def _block_from_form(self, vals: tuple[float, float, float, float]) -> None:
         y0, z0, ln, h = vals
-        self.block = FoamBlock(length_y=ln, height_z=h, width_x=self.params.bw.value(), y0=y0, z0=z0,
-                               x_offset=self.params.boff.value())
+        self.block = replace(self.block, length_y=ln, height_z=h, width_x=self.params.bw.value(), y0=y0, z0=z0,
+                             x_offset=self.params.boff.value())
+        if self.linked:
+            self.block_edited.emit(self.block)
 
     # ── simulation ────────────────────────────────────────────────────
     def run_simulation(self) -> None:
@@ -362,9 +657,7 @@ class CutLab(QWidget):
             return
         if self._sim_job is not None:
             return
-        b = self.block
-        self.block = FoamBlock(length_y=b.length_y, height_z=b.height_z, width_x=self.params.bw.value(), y0=b.y0,
-                               z0=b.z0, x_offset=self.params.boff.value())
+        self.block = replace(self.block, width_x=self.params.bw.value(), x_offset=self.params.boff.value())
         job = Job(simulate, self.toolpath, self.block, self.setup(), limits=self.params.limits(),
                   n_slices=self.sim.slices.value(), cell_mm=self.sim.cell_mm(), parent=self)
         job._kw["progress"] = job.report
@@ -425,27 +718,62 @@ class CutLab(QWidget):
 
     # ── profiles ──────────────────────────────────────────────────────
     def current_profile(self) -> cut_profile.CutProfile:
-        return self.params.profile(self.calib.measurements)
+        p = self.params.profile(self.calib.measurements)
+        p.work = self.work
+        return p
 
     def apply_profile(self, p: cut_profile.CutProfile) -> None:
         self.params.set_profile(p)
         self.calib.set_measurements(p.measurements)
 
     def _load_saved(self) -> None:
-        path = _profile_path()
+        path = self.profile_path
         if path.exists():
             try:
-                self.apply_profile(cut_profile.load(path))
+                p = cut_profile.load(path)
+                self.apply_profile(p)
+                self.work = p.work
             except Exception:  # a broken profile must not keep the lab from opening
                 pass
 
+    def _schedule_save(self) -> None:
+        if self.persist:
+            self._save_timer.start()
+
     def save_default(self) -> None:
-        path = _profile_path()
+        """Write the profile (and the saved work settings) to :attr:`profile_path`. No-op unless ``persist``."""
+        if not self.persist:
+            return
+        self._save_timer.stop()
         try:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            cut_profile.save(self.current_profile(), path)
+            self.profile_path.parent.mkdir(parents=True, exist_ok=True)
+            cut_profile.save(self.current_profile(), self.profile_path)
         except OSError:
             pass
+
+    def save_work(self) -> WorkSettings | None:
+        """Guided mode's "Save and use for the project": store the work settings and hand them over."""
+        rec = self.guided.recommendation()
+        if "v" not in rec:
+            return None
+        s = self.setup()
+        st = point_state(s, rec["v"])
+        cal = s.calib
+        self.work = WorkSettings(
+            work_feed_mm_s=float(rec["v"]), kerf_mm=float(rec["kerf"]), supply_mode=s.mode,
+            voltage_v=float(s.voltage_v if s.mode == "voltage" else st.voltage_v),
+            current_a=float(st.current_a), calibrated=not (abs(cal.eta - 1) < 1e-6 and abs(cal.kappa - 1) < 1e-6),
+            saved_at=datetime.now().isoformat(timespec="seconds"))
+        self.params.set_probe_speed(rec["v"])
+        self.save_default()
+        where = f" to <i>{self.profile_path}</i>" if self.persist else ""
+        self.guided.show_saved(f"<span style='color:{self._c.success}'>✓ Saved{where}.</span> Work feed "
+                               f"{self.work.work_feed_mm_s:.1f} mm/s, kerf compensation "
+                               f"{self.work.kerf_offset_mm:.2f} mm per side.")
+        self.work_speed_chosen.emit(self.work.work_feed_mm_s, self.work.kerf_mm)
+        self.work_saved.emit(self.work)
+        self.close_requested.emit()
+        return self.work
 
     def _load_profile(self) -> None:
         path, _ = QFileDialog.getOpenFileName(self, "Load Cut Lab profile", filter="Cut Lab profile (*.json)")
@@ -477,9 +805,10 @@ class CutLabDialog(QDialog):
 
     def __init__(self, parent: QWidget | None = None, theme: str = "dark") -> None:
         super().__init__(parent)
-        self.setWindowTitle("Cut Lab — hot wire in foam")
+        self.setWindowTitle("Step 4 · Cut Lab — wire temperature, feed and kerf")
         self.resize(1560, 940)
         self.lab = CutLab(self, theme)
+        self.lab.close_requested.connect(lambda: QTimer.singleShot(700, self.close))  # let "✓ Saved" show
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.addWidget(self.lab)

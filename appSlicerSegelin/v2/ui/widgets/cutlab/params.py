@@ -1,29 +1,32 @@
 """Cut Lab parameter panel: supply, feed, wire, foam, machine motion and model calibration."""
 from __future__ import annotations
 
-from PyQt6.QtCore import Qt, QTimer, pyqtSignal
+from PyQt6.QtCore import QSize, Qt, QTimer, pyqtSignal
 from PyQt6.QtWidgets import (
     QCheckBox,
     QComboBox,
-    QDoubleSpinBox,
     QFormLayout,
+    QHBoxLayout,
     QLabel,
+    QPushButton,
     QScrollArea,
     QVBoxLayout,
     QWidget,
 )
 
+from ....core.calibration import resistivity_from_cold
 from ....core.cut_profile import CutProfile
 from ....core.cutting_physics import FOAMS, WIRE_MATERIALS, Calibration, CutSetup, Foam, WireMaterial
 from ....core.motion import MotionLimits
 from ..collapsible import CollapsibleSection
+from ..numfield import NumField
 from .common import ParamRow
 
 CUSTOM = "Custom"
 
 
-def _spin(lo: float, hi: float, val: float, dec: int = 2, step: float = 0.1, suffix: str = "", tip: str = "") -> QDoubleSpinBox:
-    s = QDoubleSpinBox()
+def _spin(lo: float, hi: float, val: float, dec: int = 2, step: float = 0.1, suffix: str = "", tip: str = "") -> NumField:
+    s = NumField()
     s.setRange(lo, hi)
     s.setDecimals(dec)
     s.setSingleStep(step)
@@ -44,12 +47,11 @@ class ParamsPanel(QScrollArea):
         super().__init__(parent)
         self.setWidgetResizable(True)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.setMinimumWidth(310)
         self.setObjectName("Sidebar")  # same surface + cards as the main window's sidebar
         self._loading = False
         self._debounce = QTimer(self)
         self._debounce.setSingleShot(True)
-        self._debounce.setInterval(90)
+        self._debounce.setInterval(10)  # coalesce one burst of edits; the read-outs are cheap
         self._debounce.timeout.connect(self.changed.emit)
 
         body = QWidget()
@@ -62,21 +64,38 @@ class ParamsPanel(QScrollArea):
         # ── power supply ──────────────────────────────────────────────
         sec = CollapsibleSection("Power supply")
         self.mode = QComboBox()
-        self.mode.addItems(["Constant current (CC)", "Constant voltage (CV)"])
-        self.mode.setToolTip("CC: the supply holds the current; the wire's temperature sets the voltage.\n"
-                             "CV: the supply holds the voltage; as the wire heats its resistance rises and the "
-                             "current drops.")
+        self.mode.addItems(["Set current (CC), voltage limit", "Set voltage (CV), current limit"])
+        self.mode.setCurrentIndex(1)  # bench supplies are usually run in CV, capped near 30 V
+        self.mode.setToolTip("Like a bench supply:\n"
+                             "CV: you set the voltage and a current limit. As the wire heats its resistance rises "
+                             "and the current drops; if the wire would draw more than the limit, the supply holds "
+                             "the limit (it drops into CC).\n"
+                             "CC: you set the current; the supply raises the voltage up to its maximum.")
         sec.add(self.mode)
         self.current = ParamRow("Current", 0.1, 6.0, 1.2, step=0.05, suffix=" A",
                                 tip="Current through the wire. Joule heat grows with I².")
-        self.voltage = ParamRow("Voltage", 0.3, 36.0, 4.0, step=0.1, suffix=" V",
+        self.voltage = ParamRow("Voltage", 0.3, 30.0, 4.0, step=0.1, suffix=" V",
                                 tip="Voltage at the supply terminals (leads + wire).")
-        self.leads = _spin(0, 5, 0.10, 3, 0.01, " Ω", "Resistance of the leads and clamps (CV mode only).")
+        self.ilim = _spin(0.1, 20, 5.0, 2, 0.1, " A", "CV mode: the supply's current limit. If the wire would draw "
+                                                      "more, the supply holds this current instead.")
+        self.vmax = _spin(1, 120, 30.0, 1, 1, " V", "The most your supply can give (bench supplies: about 30 V). "
+                                                   "Caps the voltage slider; in CC mode the supply cannot push "
+                                                   "the current past this voltage.")
+        self.leads = _spin(0, 5, 0.10, 3, 0.01, " Ω", "Resistance of the leads and clamps: they take a share of the "
+                                                    "voltage.")
         sec.add(self.current)
         sec.add(self.voltage)
         f = QFormLayout()
+        self.ilim_lbl = QLabel("Current limit")
+        f.addRow(self.ilim_lbl, self.ilim)
+        f.addRow("Supply max voltage", self.vmax)
         f.addRow("Lead resistance", self.leads)
         sec.add_layout(f)
+        self.supply_out = QLabel("")
+        self.supply_out.setObjectName("SupplyReadout")
+        self.supply_out.setWordWrap(True)
+        self.supply_out.setTextFormat(Qt.TextFormat.RichText)
+        sec.add(self.supply_out)
         v.addWidget(sec)
 
         # ── feed ──────────────────────────────────────────────────────
@@ -110,6 +129,21 @@ class ParamsPanel(QScrollArea):
         f.addRow("α (resistance)", self.alpha)
         f.addRow("Emissivity", self.emis)
         f.addRow("Conductivity", self.wire_k)
+        sec.add_layout(f)
+        self.r_info = QLabel("")
+        self.r_info.setObjectName("CardSub")
+        self.r_info.setWordWrap(True)
+        sec.add(self.r_info)
+        f = QFormLayout()
+        self.r_meas = _spin(0, 1000, 0, 3, 0.1, " Ω", "Measured with a multimeter, supply OFF, clamp to clamp. "
+                                                    "Sets the resistivity so the model's wire matches yours.")
+        row = QHBoxLayout()
+        row.addWidget(self.r_meas, 1)
+        self.r_use = QPushButton("Use")
+        self.r_use.setToolTip("Derive the resistivity from the measured cold resistance (ρ = R·A / L).")
+        self.r_use.clicked.connect(self._use_measured_r)
+        row.addWidget(self.r_use)
+        f.addRow("Measured cold R", row)
         sec.add_layout(f)
         v.addWidget(sec)
 
@@ -187,7 +221,8 @@ class ParamsPanel(QScrollArea):
         self.foam.currentTextChanged.connect(self._on_foam)
         for w in (self.current, self.voltage, self.speed, self.override):
             w.valueChanged.connect(self._edited)
-        for w in (self.leads, self.diam, self.span, self.tension, self.ambient, self.eta, self.kappa, self.gapc,
+        self.vmax.valueChanged.connect(self._on_vmax)
+        for w in (self.ilim, self.leads, self.diam, self.span, self.tension, self.ambient, self.eta, self.kappa, self.gapc,
                   self.drag, self.bw, self.boff, self.vy, self.vz, self.ay, self.az, self.jd):
             w.valueChanged.connect(self._edited)
         for w in (self.rho, self.alpha, self.emis, self.wire_k):
@@ -197,6 +232,12 @@ class ParamsPanel(QScrollArea):
         self.honor.toggled.connect(self._edited)
         self._on_wire(self.wire.currentText())
         self._on_mode()
+
+    def minimumSizeHint(self) -> QSize:
+        # never narrower than the fields: the horizontal scroll bar is off, so they would be cut
+        body = self.widget().minimumSizeHint().width() if self.widget() else 0
+        return QSize(max(310, body + self.verticalScrollBar().sizeHint().width() + 2 * self.frameWidth()),
+                     super().minimumSizeHint().height())
 
     # ── state ─────────────────────────────────────────────────────────
     def _edited(self, *_: object) -> None:
@@ -216,8 +257,27 @@ class ParamsPanel(QScrollArea):
         cv = self.mode.currentIndex() == 1
         self.current.setVisible(not cv)
         self.voltage.setVisible(cv)
-        self.leads.setEnabled(cv)
+        self.ilim.setVisible(cv)
+        self.ilim_lbl.setVisible(cv)
         self._edited()
+
+    def _on_vmax(self, vmax: float) -> None:
+        self.voltage.set_maximum(vmax)
+        self._edited()
+
+    def _use_measured_r(self) -> None:
+        r = self.r_meas.value()
+        if r > 0:
+            self.set_resistivity(resistivity_from_cold(r, self.setup()))
+
+    def set_supply_readout(self, html: str) -> None:
+        self.supply_out.setText(html)
+
+    def set_wire_info(self, text: str) -> None:
+        self.r_info.setText(text)
+
+    def is_cv(self) -> bool:
+        return self.mode.currentIndex() == 1
 
     def _on_wire(self, name: str) -> None:
         w = WIRE_MATERIALS.get(name)
@@ -257,6 +317,7 @@ class ParamsPanel(QScrollArea):
             foam=foam, block_width_mm=min(self.bw.value(), self.span.value() - 2), block_offset_mm=self.boff.value(),
             mode="voltage" if self.mode.currentIndex() == 1 else "current", current_a=self.current.value(),
             voltage_v=self.voltage.value(), lead_resistance_ohm=self.leads.value(), ambient_c=self.ambient.value(),
+            current_limit_a=self.ilim.value(), voltage_limit_v=self.vmax.value(),
             calib=Calibration(eta=self.eta.value(), kappa=self.kappa.value(), contact_gap_mm=self.gapc.value(),
                               c_drag_n_m_per_mm_s=self.drag.value()),
         )
@@ -271,6 +332,14 @@ class ParamsPanel(QScrollArea):
 
     def set_drive(self, drive: float) -> None:
         (self.voltage if self.mode.currentIndex() == 1 else self.current).setValue(drive)
+        self._edited()
+
+    def set_voltage(self, x: float) -> None:
+        self.voltage.setValue(x)
+        self._edited()
+
+    def set_current(self, x: float) -> None:
+        self.current.setValue(x)
         self._edited()
 
     def set_probe_speed(self, v: float) -> None:
@@ -305,6 +374,9 @@ class ParamsPanel(QScrollArea):
         s = p.setup
         self._loading = True
         self.mode.setCurrentIndex(1 if s.mode == "voltage" else 0)
+        self.vmax.setValue(s.voltage_limit_v)
+        self.voltage.set_maximum(s.voltage_limit_v)
+        self.ilim.setValue(s.current_limit_a)
         self.current.setValue(s.current_a)
         self.voltage.setValue(s.voltage_v)
         self.leads.setValue(s.lead_resistance_ohm)

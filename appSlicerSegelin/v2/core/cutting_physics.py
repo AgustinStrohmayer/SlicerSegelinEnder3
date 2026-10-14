@@ -120,6 +120,8 @@ class CutSetup:
     current_a: float = 1.2
     voltage_v: float = 4.0
     lead_resistance_ohm: float = 0.10
+    current_limit_a: float = 5.0    # CV: the supply's current limit (it drops into CC there)
+    voltage_limit_v: float = 30.0   # CC: the supply's top voltage (bench supplies top out near 30 V)
     ambient_c: float = 22.0
     clamp_temp_c: float | None = None  # None: clamps at ambient
     calib: Calibration = field(default_factory=Calibration)
@@ -168,39 +170,60 @@ def removal_energy(s: CutSetup) -> float:
     return f.density_kg_m3 * (f.specific_heat_j_kgk * max(1.0, f.iso_temp_c - s.ambient_c) + f.latent_j_kg)
 
 
+def _front_coeffs(t_k, s: CutSetup):  # type: ignore[no-untyped-def]
+    """``q_front = a / ln(r_m/r_w) + b``: the two terms that do not depend on ``r_m``."""
+    rw = s.diameter_mm * 1e-3 / 2
+    tiso = s.foam.iso_temp_c + K0
+    t_k = np.asarray(t_k, float)
+    dt = np.maximum(t_k - tiso, 0.0)
+    kg = air_conductivity(0.5 * (t_k + tiso))
+    a = s.calib.eta * np.pi * kg * dt
+    b = s.calib.eta * s.wire.emissivity * SIGMA * np.pi * rw * np.maximum(t_k**4 - tiso**4, 0.0)
+    return a, b
+
+
 def q_front(r_m, t_k, s: CutSetup):  # type: ignore[no-untyped-def]
     """Heat delivered by the wire to the melt front at radius ``r_m`` (m), W/m."""
     rw = s.diameter_mm * 1e-3 / 2
-    tiso = s.foam.iso_temp_c + K0
-    dt = np.maximum(np.asarray(t_k) - tiso, 0.0)
-    kg = air_conductivity(0.5 * (t_k + tiso))
-    cond = np.pi * kg * dt / np.log(np.maximum(r_m / rw, 1 + 1e-9))
-    rad = s.wire.emissivity * SIGMA * np.pi * rw * np.maximum(np.asarray(t_k) ** 4 - tiso**4, 0.0)
-    return s.calib.eta * (cond + rad)
+    a, b = _front_coeffs(t_k, s)
+    return a / np.log(np.maximum(r_m / rw, 1 + 1e-9)) + b
 
 
 R_CAP_MM = 8.0  # melt radius ceiling: beyond this the steady model is meaningless (dwell)
+GAP_MIN_M = 1e-9  # melt radius floor: r_w + this
+MELT_ITERS = 22   # bisection on log(gap) (range ≈ 16 → 4e-6), then one false-position step
 
 
 def melt_radius(t_k, v_mm_s, s: CutSetup):  # type: ignore[no-untyped-def]
     """Steady melt-front radius (m) for wire temperature ``t_k`` and feed ``v``.
 
-    Vectorised bisection on log(gap). Where the wire is not above the foam's
+    Vectorised bisection on log(gap) (the temperature-only terms of
+    ``q_front`` are computed once). Where the wire is not above the foam's
     isotherm it cannot cut: returns ``r_w`` (and the caller flags a stall).
     """
     t_k, v = np.broadcast_arrays(np.asarray(t_k, float), np.asarray(v_mm_s, float))
     rw = s.diameter_mm * 1e-3 / 2
-    ev = removal_energy(s)
-    vv = np.maximum(v, 1e-6) * 1e-3
-    lo = np.full(t_k.shape, np.log(1e-9))
+    a, b = _front_coeffs(t_k, s)
+    c = 2 * removal_energy(s) * np.maximum(v, 1e-6) * 1e-3
+    floor = np.log(1 + 1e-9)
+
+    def surplus(log_gap):  # type: ignore[no-untyped-def]
+        gap = np.exp(log_gap)
+        return a / np.maximum(np.log1p(gap / rw), floor) + b - c * (rw + gap)
+
+    lo = np.full(t_k.shape, np.log(GAP_MIN_M))
     hi = np.full(t_k.shape, np.log(R_CAP_MM * 1e-3))
-    for _ in range(48):
+    f_lo, f_hi = surplus(lo), surplus(hi)
+    for _ in range(MELT_ITERS):
         mid = 0.5 * (lo + hi)
-        r = rw + np.exp(mid)
-        surplus = q_front(r, t_k, s) - ev * vv * 2 * r
-        lo = np.where(surplus > 0, mid, lo)
-        hi = np.where(surplus > 0, hi, mid)
-    r = rw + np.exp(0.5 * (lo + hi))
+        f = surplus(mid)
+        up = f > 0
+        lo, f_lo = np.where(up, mid, lo), np.where(up, f, f_lo)
+        hi, f_hi = np.where(up, hi, mid), np.where(up, f_hi, f)
+    # one false-position step inside the final bracket (where it brackets a root)
+    brk = (f_lo > 0) & (f_hi <= 0)
+    w = np.where(brk, f_lo / np.where(brk, f_lo - f_hi, 1.0), 0.5)
+    r = rw + np.exp(lo + np.clip(w, 0.0, 1.0) * (hi - lo))
     return np.where(t_k > s.foam.iso_temp_c + K0, r, rw)
 
 
@@ -219,81 +242,177 @@ class PointState:
     q_cut_w_m: np.ndarray     # heat into the foam per metre of wire
     current_a: np.ndarray
     power_w: np.ndarray       # electrical power of the whole wire
+    voltage_v: np.ndarray     # at the supply terminals (wire + leads)
+    limited: np.ndarray       # bool: the supply sits on its other limit (CV: current limit; CC: voltage limit)
+
+
+T_SOLVE_ITERS = 34  # bisection on the wire temperature: ~1 500 K bracket / 2^34 ≈ 1e-7 K
 
 
 def _solve_uniform(i_a, v, s: CutSetup, in_foam: bool):  # type: ignore[no-untyped-def]
-    """Uniform wire temperature (K) for current ``i_a``; vectorised bisection."""
+    """Uniform wire temperature (K) for current ``i_a``; vectorised bisection.
+
+    In the foam, ``I²R'(T) = q_front(r_m(T), T) + ½·q_air(T)`` is solved
+    without nesting the melt-radius solve: the heat left for the front,
+    ``D = I²R' − ½·q_air``, fixes the radius the foam *demands*,
+    ``r_D = D / (2·e_v·v)``; the wire is still too cold exactly when the front
+    would take less than ``D`` at that radius (``q_front(r_D) < D``), because
+    the front's surplus ``q_front(r) − 2·e_v·v·r`` falls monotonically with r.
+    """
     i_a, v = np.broadcast_arrays(np.asarray(i_a, float), np.asarray(v, float))
     tinf = s.ambient_c + K0
     lo = np.full(i_a.shape, tinf)
     hi = np.full(i_a.shape, s.wire.max_temp_c + 400 + K0)
-    for _ in range(46):
+    i2 = i_a**2
+    rw = s.diameter_mm * 1e-3 / 2
+    c = 2 * removal_energy(s) * np.maximum(v, 1e-6) * 1e-3
+    r_lo, r_hi = rw + GAP_MIN_M, rw + R_CAP_MM * 1e-3
+    for _ in range(T_SOLVE_ITERS):
         mid = 0.5 * (lo + hi)
-        gen = i_a**2 * resistance_per_m(mid, s)
+        gen = i2 * resistance_per_m(mid, s)
         if in_foam:
-            loss = q_front(melt_radius(mid, v, s), mid, s) + 0.5 * q_air(mid, s)
+            d_front = gen - 0.5 * q_air(mid, s)
+            r_d = np.clip(d_front / c, r_lo, r_hi)
+            heats = d_front > q_front(r_d, mid, s)
         else:
-            loss = q_air(mid, s)
-        lo = np.where(gen > loss, mid, lo)
-        hi = np.where(gen > loss, hi, mid)
+            heats = gen > q_air(mid, s)
+        lo = np.where(heats, mid, lo)
+        hi = np.where(heats, hi, mid)
     return 0.5 * (lo + hi)
 
 
-def point_state(s: CutSetup, v_mm_s, *, current_a=None, voltage_v=None) -> PointState:  # type: ignore[no-untyped-def]
+def _current_state(i, v, s: CutSetup):  # type: ignore[no-untyped-def]
+    """(T_air, T_foam, R_total incl. leads) at current ``i`` (arrays broadcast with ``v``)."""
+    span = s.span_mm * 1e-3
+    b = min(s.block_width_mm, s.span_mm) * 1e-3
+    t_air = _solve_uniform(i, v, s, False)
+    t_foam = _solve_uniform(i, v, s, True)
+    r_tot = resistance_per_m(t_air, s) * (span - b) + resistance_per_m(t_foam, s) * b + s.lead_resistance_ohm
+    return t_air, t_foam, r_tot
+
+
+VOLT_ITERS = 40    # hard cap: the voltage solve can never hang
+VOLT_RTOL = 1e-7
+
+
+def _voltage_state(u, v, s: CutSetup):  # type: ignore[no-untyped-def]
+    """Current drawn at supply voltage ``u``: the root of ``I·R_tot(I) − U``.
+
+    ``I·R_tot(I)`` grows monotonically with ``I`` (R rises with temperature),
+    so the root sits in the bracket [U / R_hot, U / R_cold], R_hot being the
+    resistance at the solver's temperature ceiling. Illinois (safeguarded false
+    position): typically 4–8 steps, never more than ``VOLT_ITERS``.
+    Returns (I, T_air, T_foam, R_total).
+    """
+    u, v = np.broadcast_arrays(np.asarray(u, float), np.asarray(v, float))
+    u = np.maximum(u, 0.0)
+    span = s.span_mm * 1e-3
+    r_cold = float(resistance_per_m(s.ambient_c + K0, s)) * span + s.lead_resistance_ohm
+    r_hot = float(resistance_per_m(s.wire.max_temp_c + 400 + K0, s)) * span + s.lead_resistance_ohm
+    a = u / max(r_hot, r_cold)
+    b = u / max(min(r_hot, r_cold), 1e-9)
+    fa = a * _current_state(a, v, s)[2] - u   # ≤ 0
+    fb = b * _current_state(b, v, s)[2] - u   # ≥ 0
+    side = np.zeros(u.shape)
+    i = 0.5 * (a + b)
+    for _ in range(VOLT_ITERS):
+        if np.all(b - a <= VOLT_RTOL * np.maximum(b, 1e-12)):
+            break
+        den = fb - fa
+        safe = np.abs(den) > 1e-300
+        i = np.where(safe, b - fb * (b - a) / np.where(safe, den, 1.0), 0.5 * (a + b))
+        i = np.where((i > a) & (i < b), i, 0.5 * (a + b))
+        f = i * _current_state(i, v, s)[2] - u
+        if np.all(np.abs(f) <= VOLT_RTOL * np.maximum(u, 1e-12)):
+            break
+        neg = f < 0
+        # Illinois: halve the stale end's value when the same end survives twice
+        fb = np.where(neg & (side == -1), 0.5 * fb, fb)
+        fa = np.where(~neg & (side == 1), 0.5 * fa, fa)
+        a, fa = np.where(neg, i, a), np.where(neg, f, fa)
+        b, fb = np.where(neg, b, i), np.where(neg, fb, f)
+        side = np.where(neg, -1, 1)
+    t_air, t_foam, r_tot = _current_state(i, v, s)
+    return i, t_air, t_foam, r_tot
+
+
+def point_state(s: CutSetup, v_mm_s, *, current_a=None, voltage_v=None,  # type: ignore[no-untyped-def]
+                limits: bool = True) -> PointState:
     """Steady state at mid-block, ignoring end conduction (fast; vectorised).
 
     ``current_a`` / ``voltage_v`` override the setup (arrays broadcast with
-    ``v_mm_s``), so a whole operating map is one call.
+    ``v_mm_s``), so a whole operating map is one call. With ``limits`` the
+    supply behaves like a bench supply: in CV it never gives more than
+    ``s.current_limit_a`` (it drops into CC there), in CC never more than
+    ``s.voltage_limit_v`` (it drops into CV).
     """
     mode = "voltage" if voltage_v is not None else ("current" if current_a is not None else s.mode)
     v = np.asarray(v_mm_s, float)
-    span = s.span_mm * 1e-3
-    b = min(s.block_width_mm, s.span_mm) * 1e-3
     if mode == "current":
         i = np.asarray(s.current_a if current_a is None else current_a, float)
         i, v = np.broadcast_arrays(i, v)
-        t_air = _solve_uniform(i, v, s, False)
-        t_foam = _solve_uniform(i, v, s, True)
+        t_air, t_foam, r_tot = _current_state(i, v, s)
+        limited = (i * r_tot > s.voltage_limit_v) if limits else np.zeros(i.shape, bool)
+        if np.any(limited):
+            i2, ta2, tf2, rt2 = _voltage_state(np.full(i.shape, s.voltage_limit_v), v, s)
+            i, t_air, t_foam, r_tot = (np.where(limited, x2, x1) for x1, x2 in
+                                       ((i, i2), (t_air, ta2), (t_foam, tf2), (r_tot, rt2)))
     else:
         u = np.asarray(s.voltage_v if voltage_v is None else voltage_v, float)
         u, v = np.broadcast_arrays(u, v)
-        i = u / (resistance_per_m(s.ambient_c + K0, s) * span + s.lead_resistance_ohm)
-        for _ in range(30):  # the wire's resistance rises as it heats: fixed point on I
-            t_air = _solve_uniform(i, v, s, False)
-            t_foam = _solve_uniform(i, v, s, True)
-            r_tot = resistance_per_m(t_air, s) * (span - b) + resistance_per_m(t_foam, s) * b + s.lead_resistance_ohm
-            i = 0.5 * i + 0.5 * u / r_tot
+        i, t_air, t_foam, r_tot = _voltage_state(u, v, s)
+        limited = (i > s.current_limit_a) if limits else np.zeros(i.shape, bool)
+        if np.any(limited):
+            i2 = np.full(i.shape, s.current_limit_a)
+            ta2, tf2, rt2 = _current_state(i2, v, s)
+            i, t_air, t_foam, r_tot = (np.where(limited, x2, x1) for x1, x2 in
+                                       ((i, i2), (t_air, ta2), (t_foam, tf2), (r_tot, rt2)))
     r = melt_radius(t_foam, v, s)
     rw = s.diameter_mm * 1e-3 / 2
     stall = t_foam <= s.foam.iso_temp_c + K0 + 1.0
     gap = (r - rw) * 1e3
     q = np.where(stall, 0.0, q_front(r, t_foam, s))
-    power = i**2 * (resistance_per_m(t_air, s) * (span - b) + resistance_per_m(t_foam, s) * b)
+    power = i**2 * (r_tot - s.lead_resistance_ohm)
     return PointState(
         t_air_c=t_air - K0, t_foam_c=t_foam - K0, r_m_mm=r * 1e3, kerf_mm=2 * s.calib.kappa * r * 1e3,
         gap_mm=gap, contact=(gap < s.calib.contact_gap_mm) | stall, stall=stall, q_cut_w_m=q,
-        current_a=i, power_w=power,
+        current_a=i, power_w=power, voltage_v=i * r_tot, limited=np.asarray(limited),
     )
 
 
+def cold_resistance_ohm(s: CutSetup) -> float:
+    """Wire resistance between the clamps at room temperature, ρ(T∞)·L / A (leads excluded)."""
+    return float(resistance_per_m(s.ambient_c + K0, s)) * s.span_mm * 1e-3
+
+
+def current_for_air_temp(s: CutSetup, t_c):  # type: ignore[no-untyped-def]
+    """Current that holds the wire at ``t_c`` in still air (closed form of I²·R'(T) = q_air(T))."""
+    tk = np.asarray(t_c, float) + K0
+    return np.sqrt(q_air(tk, s) / resistance_per_m(tk, s))
+
+
 def contact_speed(s: CutSetup, *, current_a=None, voltage_v=None, v_max: float = 500.0) -> float:  # type: ignore[no-untyped-def]
-    """Fastest feed (mm/s) that still cuts without touching the foam (0 if it never does)."""
-    vs = np.geomspace(0.02, v_max, 160)
-    st = point_state(s, vs, current_a=current_a, voltage_v=voltage_v)
-    ok = ~st.contact
+    """Fastest feed (mm/s) that still cuts without touching the foam (0 if it never does).
+
+    A log-spaced scan, then two vectorised refinements of the bracket (to
+    about 0.01 %): three model calls in all, in either supply mode.
+    """
+    vs = np.geomspace(0.02, v_max, 120)
+    ok = ~np.asarray(point_state(s, vs, current_a=current_a, voltage_v=voltage_v).contact)
     if not ok.any():
         return 0.0
     if ok.all():
         return v_max
-    k = int(np.argmin(ok))  # first contact speed
-    lo, hi = vs[max(0, k - 1)], vs[k]
-    for _ in range(25):
-        mid = np.sqrt(lo * hi)
-        if point_state(s, mid, current_a=current_a, voltage_v=voltage_v).contact:
-            hi = mid
-        else:
-            lo = mid
-    return float(lo)
+    for _ in range(2):
+        k = int(np.argmin(ok))  # first contact speed
+        if k == 0:
+            return float(vs[0])
+        vs = np.geomspace(vs[k - 1], vs[k], 24)
+        ok = ~np.asarray(point_state(s, vs, current_a=current_a, voltage_v=voltage_v).contact)
+        ok[0] = True  # the bracket's low end was clean
+        if ok.all():
+            return float(vs[-1])
+    return float(vs[int(np.argmin(ok)) - 1])
 
 
 def wire_time_constant_s(s: CutSetup, t_c: float) -> float:
@@ -381,19 +500,25 @@ def span_profile(s: CutSetup, speeds=None, nodes: int = 241) -> SpanProfile:  # 
     nv = len(speeds)
 
     def loss_of(t, vb, foam_mask):  # type: ignore[no-untyped-def]
-        la = q_air(t, s)
-        lf = q_front(melt_radius(t, vb, s), t, s) + 0.5 * la
-        return np.where(foam_mask[None, :], lf, la)
+        loss = q_air(t, s)
+        if foam_mask.any():  # the melt front only where the wire is in the foam
+            tf, vf = t[:, foam_mask], vb[:, foam_mask]
+            loss[:, foam_mask] = q_front(melt_radius(tf, vf, s), tf, s) + 0.5 * loss[:, foam_mask]
+        return loss
 
-    def solve(i_a, foam_mask, voltage=None):  # type: ignore[no-untyped-def]
-        """Newton on the fin equation; with ``voltage`` the current follows the wire's resistance."""
-        t = np.broadcast_to(_solve_uniform(i_a, speeds, s, False)[:, None], (nv, nodes)).copy()
+    def solve(i_a, foam_mask, u_rows):  # type: ignore[no-untyped-def]
+        """Newton on the fin equation. Rows with a finite ``u_rows`` are voltage-driven (the current
+        follows the wire's resistance); the others hold ``i_a``."""
+        cv = np.isfinite(u_rows)
+        t_a = _solve_uniform(i_a, speeds, s, False)
+        t_f = _solve_uniform(i_a, speeds, s, True) if foam_mask.any() else t_a
+        t = np.where(foam_mask[None, :], t_f[:, None], t_a[:, None])
         vb = np.broadcast_to(speeds[:, None], (nv, nodes))
         r0 = resistance_per_m(20 + K0, s)
         for _ in range(40):
-            if voltage is not None:
+            if cv.any():
                 r_tot = np.trapezoid(resistance_per_m(t, s), x, axis=1) + s.lead_resistance_ohm
-                i_a = 0.5 * i_a + 0.5 * voltage / r_tot
+                i_a = np.where(cv, 0.5 * i_a + 0.5 * np.where(cv, u_rows, 0.0) / r_tot, i_a)
             i2 = (i_a**2)[:, None]
             gen = i2 * resistance_per_m(t, s)
             dgen = i2 * r0 * s.wire.alpha_per_k
@@ -416,14 +541,18 @@ def span_profile(s: CutSetup, speeds=None, nodes: int = 241) -> SpanProfile:  # 
                 break
         return t, i_a
 
+    # the supply: the mid-block model says which rows sit on the other limit (bench-supply behaviour)
+    pst = point_state(s, speeds)
+    lim = np.asarray(pst.limited, bool)
+    i_seed = np.asarray(pst.current_a, float)
     if s.mode == "current":
-        i_a = np.full(nv, s.current_a)
-        t, _ = solve(i_a, in_foam)
-        t_air, _ = solve(i_a, np.zeros(nodes, bool))
+        u_rows = np.where(lim, s.voltage_limit_v, np.nan)
+        i0 = np.where(lim, i_seed, s.current_a)
     else:
-        i0 = np.full(nv, s.voltage_v / (resistance_per_m(tinf, s) * span + s.lead_resistance_ohm))
-        t, i_a = solve(i0, in_foam, s.voltage_v)
-        t_air, _ = solve(i0, np.zeros(nodes, bool), s.voltage_v)
+        u_rows = np.where(lim, np.nan, s.voltage_v)
+        i0 = np.where(lim, s.current_limit_a, i_seed)
+    t, i_a = solve(i0, in_foam, u_rows)
+    t_air, _ = solve(i0, np.zeros(nodes, bool), u_rows)
     vb = np.broadcast_to(speeds[:, None], (nv, nodes))
     r = melt_radius(t, vb, s)
     rw = d / 2
@@ -473,15 +602,48 @@ class OperatingMap:
 
 
 def operating_map(s: CutSetup, drive=None, speeds=None) -> OperatingMap:  # type: ignore[no-untyped-def]
-    """Kerf and regime over a grid of drive (A or V) × feed speed."""
+    """Kerf and regime over a grid of drive (A or V) × feed speed.
+
+    By default the drive axis runs from 0.25× to 2.5× the setting (in CV, no
+    higher than the supply's ``voltage_limit_v``). In CV the map is
+    computed on a current grid (one vectorised CC call) and read back at each
+    voltage through the monotone U(I) of each feed column, so it costs about
+    as much as a CC map; the current limit is applied on the way.
+    """
     if drive is None:
         if s.mode == "current":
             drive = np.linspace(max(0.05, s.current_a * 0.25), s.current_a * 2.5, 70)
         else:
-            drive = np.linspace(max(0.1, s.voltage_v * 0.25), s.voltage_v * 2.5, 70)
+            top = min(s.voltage_v * 2.5, max(s.voltage_limit_v, s.voltage_v))
+            drive = np.linspace(max(0.1, s.voltage_v * 0.25), top, 70)
+    drive = np.asarray(drive, float)
     speeds = np.geomspace(0.2, 60.0, 80) if speeds is None else np.asarray(speeds, float)
-    dd, vv = np.meshgrid(np.asarray(drive, float), speeds, indexing="ij")
-    kw = {"current_a": dd} if s.mode == "current" else {"voltage_v": dd}
-    st = point_state(s, vv, **kw)
-    return OperatingMap(drive=np.asarray(drive, float), speeds=speeds, mode=s.mode, kerf_mm=st.kerf_mm,
-                        t_foam_c=st.t_foam_c, t_air_c=st.t_air_c, contact=st.contact, stall=st.stall)
+    if s.mode == "current":
+        dd, vv = np.meshgrid(drive, speeds, indexing="ij")
+        st = point_state(s, vv, current_a=dd)
+        return OperatingMap(drive=drive, speeds=speeds, mode=s.mode, kerf_mm=st.kerf_mm,
+                            t_foam_c=st.t_foam_c, t_air_c=st.t_air_c, contact=st.contact, stall=st.stall)
+    # CV: a CC grid wide enough for every voltage, then U(I) → I per column
+    span = s.span_mm * 1e-3
+    r_cold = float(resistance_per_m(s.ambient_c + K0, s)) * span + s.lead_resistance_ohm
+    r_hot = float(resistance_per_m(s.wire.max_temp_c + 400 + K0, s)) * span + s.lead_resistance_ohm
+    i_lo = max(1e-3, float(drive.min()) / max(r_hot, r_cold))
+    i_hi = max(i_lo * 1.01, float(drive.max()) / max(min(r_hot, r_cold), 1e-9))
+    i_hi = min(i_hi, max(s.current_limit_a, i_lo * 1.01))
+    ig = np.linspace(i_lo, i_hi, 140)
+    gi, gv = np.meshgrid(ig, speeds, indexing="ij")
+    g = point_state(s, gv, current_a=gi, limits=False)
+    u_grid = np.asarray(g.voltage_v)  # [current, speed], increasing along the current axis
+    out = {k: np.empty((len(drive), len(speeds))) for k in ("t_air", "t_foam", "r_m")}
+    for j in range(len(speeds)):
+        uj = np.maximum.accumulate(u_grid[:, j])  # guard tiny non-monotone wiggles
+        i_at = np.interp(drive, uj, ig)
+        i_at = np.minimum(i_at, s.current_limit_a)
+        out["t_air"][:, j] = np.interp(i_at, ig, np.asarray(g.t_air_c)[:, j])
+        out["t_foam"][:, j] = np.interp(i_at, ig, np.asarray(g.t_foam_c)[:, j])
+        out["r_m"][:, j] = np.interp(i_at, ig, np.asarray(g.r_m_mm)[:, j])
+    rw = s.diameter_mm / 2
+    stall = out["t_foam"] <= s.foam.iso_temp_c + 1.0
+    contact = ((out["r_m"] - rw) < s.calib.contact_gap_mm) | stall
+    return OperatingMap(drive=drive, speeds=speeds, mode=s.mode, kerf_mm=2 * s.calib.kappa * out["r_m"],
+                        t_foam_c=out["t_foam"], t_air_c=out["t_air"], contact=contact, stall=stall)

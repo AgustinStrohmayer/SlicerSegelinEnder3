@@ -50,6 +50,8 @@ def test_cut_lab_live_model_simulation_and_fit(app):
     lab.sim.set_time(res.samples.total_s)
     assert "kerf" in lab.sim.readout.text()
 
+    assert lab.params.setup().mode == "voltage"  # bench supplies run in CV: the default
+    lab.params.mode.setCurrentIndex(0)  # these measurements were taken in CC
     s = lab.params.setup()
     ms = [Measurement(v, d, "current", 10 - k, 10.0)
           for d, ks in ((1.0, (1.1, 0.7, 0.5)), (1.4, (1.6, 1.0, 0.7)))
@@ -98,6 +100,7 @@ def test_cut_lab_curves_tab(app):
     lab = CutLab(theme="dark", load_saved=False)
     lab.resize(1500, 900)
     lab.show()
+    lab.params.mode.setCurrentIndex(0)  # CC: the measurements below are per current
     cv = lab.curves
     lab.tabs.setCurrentWidget(cv)
     app.processEvents()

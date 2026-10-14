@@ -141,11 +141,11 @@ class IncidenceView(pg.PlotWidget):
             self._add(t)
 
         label(f"kerf {2 * hw:.2f} mm", xk + 0.08 * view, hw * 0.5 + 0.1 * view, c.accent)
-        label(f"r_m {rm:.3f} mm", rm * 0.5, -hw - 0.04 * view, c.text, anchor=(0.5, 0))
+        label(f"r_m {rm:.3f} mm · wire {float(st.t_foam_c):.0f} °C", rm * 0.5, -hw - 0.04 * view, c.text,
+              anchor=(0.5, 0))
         gap = float(st.gap_mm)
         label(f"gap {gap * 1000:.0f} µm" if gap < 0.1 else f"gap {gap:.2f} mm", rm + 0.05 * view, 0.18 * view,
               REGIME[reg])
-        label(f"{float(st.t_foam_c):.0f} °C", -rw, -rw - 0.12 * view, c.muted, anchor=(0.5, 0))
         arrow = pg.ArrowItem(angle=180, tipAngle=30, headLen=14, tailLen=40, tailWidth=3, brush=c.text,
                              pen=pg.mkPen(None))
         arrow.setPos(X * 0.85, view * 0.78)
