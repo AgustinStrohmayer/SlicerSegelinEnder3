@@ -316,7 +316,22 @@ class MainWindow(QMainWindow):
         m.addAction(self._snap_action)
         m.addSeparator()
         add(m, "Toggle theme", self._toggle_theme, "Ctrl+T")
+        self._compat3d_action = QAction("Compatible 3D (simpler, for any computer)", self)
+        self._compat3d_action.setCheckable(True)
+        self._compat3d_action.setToolTip("Draw 3D with plain OpenGL instead of the studio (WebGL) view. "
+                                         "Takes effect when the app restarts.")
+        from .widgets.view3d.scene import backend_preference
+
+        self._compat3d_action.setChecked(backend_preference() == "opengl")
+        self._compat3d_action.toggled.connect(self._toggle_compat3d)
+        m.addAction(self._compat3d_action)
         add(m, "Keyboard shortcuts…", self._open_shortcuts_overlay)
+
+        m = mb.addMenu("&Simulate")
+        add(m, "Simulate project on the machine", self._on_simulate_project, "Ctrl+Shift+M")
+        add(m, "Open G-code in machine simulator…", self._on_simulate_gcode_file)
+        m.addSeparator()
+        add(m, "Cut Lab (wire–foam physics)…", self._on_cut_lab, "Ctrl+Shift+L")
 
     def _build_status_bar(self) -> None:
         from PyQt6.QtWidgets import QLabel
@@ -374,6 +389,11 @@ class MainWindow(QMainWindow):
         r.register(CommandEntry("view.theme", "View: Toggle theme", self._toggle_theme, "Ctrl+T"))
         r.register(CommandEntry("view.shortcuts", "View: Keyboard shortcuts", self._open_shortcuts_overlay, "?"))
         r.register(CommandEntry("view.measure", "View: Measure tool", self._measure_action.trigger, "M"))
+        r.register(CommandEntry("sim.project", "Simulate: Project on the machine (3D)", self._on_simulate_project,
+                                "Ctrl+Shift+M"))
+        r.register(CommandEntry("sim.file", "Simulate: Open G-code in machine simulator…", self._on_simulate_gcode_file))
+        r.register(CommandEntry("sim.cutlab", "Simulate: Cut Lab — wire temperature, kerf, cut simulation",
+                                self._on_cut_lab, "Ctrl+Shift+L"))
         r.register(CommandEntry("view.dims", "View: Toggle part dimensions", self._dims_action.trigger))
         r.register(CommandEntry("view.3d", "View: Toggle 3D slicer view", self._view3d_action.trigger))
         r.register(CommandEntry("preview.gen", "Preview: Generate plates/parts", self.controller.generate_preview))
@@ -540,6 +560,71 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(f"View: {mode}", 1500)
 
     # ── 3D slicer view ────────────────────────────────────────────────
+    def _machine_sim(self):  # type: ignore[no-untyped-def]
+        """The machine simulator window (created on first use; OpenGL may be missing)."""
+        dlg = getattr(self, "_sim_dialog", None)
+        if dlg is None:
+            try:
+                from .widgets.canvas.machine_sim import MachineSimDialog
+
+                dlg = self._sim_dialog = MachineSimDialog(self, self.theme)
+            except Exception as exc:  # OpenGL/pyqtgraph unavailable on this machine
+                self.toasts.show_toast("Machine simulator unavailable", str(exc), "warning")
+                return None
+        dlg.show()
+        dlg.raise_()
+        return dlg.sim
+
+    def _on_simulate_project(self) -> None:
+        if not self.controller.has_geometry:
+            self.toasts.show_toast("Nothing to simulate", "Import a DXF first.", "info")
+            return
+        from ..services import gcode_service
+
+        sim = self._machine_sim()
+        if sim is not None:
+            name = Path(self.controller.project.source_dxf_name or "project").stem + ".gcode"
+            sim.load_text(gcode_service.export_standard(self.controller.project), name)
+
+    def _on_simulate_gcode_file(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(self, "Open G-code", filter="G-code (*.gcode *.nc *.txt);;All files (*)")
+        if path:
+            sim = self._machine_sim()
+            if sim is not None:
+                sim.load_file(path)
+
+    def _project_gcode(self):  # type: ignore[no-untyped-def]
+        """(G-code, name) of the current project, or None without geometry."""
+        if not self.controller.has_geometry:
+            return None
+        from ..services import gcode_service
+
+        name = Path(self.controller.project.source_dxf_name or "project").stem + ".gcode"
+        return gcode_service.export_standard(self.controller.project), name
+
+    def _on_cut_lab(self) -> None:
+        dlg = getattr(self, "_cut_lab", None)
+        if dlg is None:
+            try:
+                from .widgets.cutlab.cut_lab import CutLabDialog
+
+                dlg = self._cut_lab = CutLabDialog(self, self.theme)
+            except Exception as exc:  # pyqtgraph/OpenGL unavailable on this machine
+                self.toasts.show_toast("Cut Lab unavailable", str(exc), "warning")
+                return
+            dlg.lab.set_project_provider(self._project_gcode)
+            got = self._project_gcode()
+            if got:
+                dlg.lab.load_text(*got)
+        dlg.show()
+        dlg.raise_()
+
+    def _toggle_compat3d(self, on: bool) -> None:
+        from .widgets.view3d.scene import set_backend_preference
+
+        set_backend_preference("opengl" if on else "auto")
+        self.toasts.show_toast("3D renderer", "Restart the app to switch the 3D view.", "info")
+
     def _toggle_3d(self, on: bool) -> None:
         self._view3d = on
         if on:

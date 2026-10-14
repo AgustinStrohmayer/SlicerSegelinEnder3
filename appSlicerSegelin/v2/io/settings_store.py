@@ -46,11 +46,11 @@ class JsonSettings:
 
 def qsettings_backed() -> Settings:
     """Return a ``QSettings``-backed implementation. Imports Qt lazily."""
-    from PyQt6.QtCore import QSettings
+    from .. import portable
 
     class _Qt:
         def __init__(self) -> None:
-            self._s = QSettings("SlicerSegelin", "Ender3")
+            self._s = portable.settings("Ender3")
 
         def get(self, key: str, default: Any = None) -> Any:
             return self._s.value(key, default)

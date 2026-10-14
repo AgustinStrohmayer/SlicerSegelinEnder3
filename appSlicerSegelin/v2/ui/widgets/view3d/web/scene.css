@@ -1,0 +1,19 @@
+:root { --bg: #0f1216; --bg2: #171c22; --text: #d7dde5; --muted: #8a94a3; --surface: rgba(30, 35, 42, .82);
+  --border: rgba(255, 255, 255, .08); --accent: #f59e0b; }
+html, body { margin: 0; height: 100%; overflow: hidden; user-select: none;
+  font: 12px/1.2 "Segoe UI", system-ui, sans-serif; color: var(--text);
+  background: radial-gradient(120% 90% at 50% 15%, var(--bg2) 0%, var(--bg) 70%); }
+#stage { position: absolute; inset: 0; }
+#stage canvas { display: block; outline: none; }
+#toolbar { position: absolute; top: 10px; right: 10px; display: flex; gap: 2px; padding: 3px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 9px;
+  backdrop-filter: blur(6px); box-shadow: 0 4px 14px rgba(0, 0, 0, .18); }
+#toolbar button { background: transparent; color: var(--muted); border: 0; border-radius: 6px; padding: 5px 9px;
+  font: inherit; font-weight: 600; cursor: pointer; transition: background .12s, color .12s; }
+#toolbar button:hover { color: var(--text); background: var(--border); }
+#toolbar button.on { color: #111; background: var(--accent); }
+#toolbar .sep { width: 1px; margin: 4px 3px; background: var(--border); }
+#gizmo { position: absolute; left: 8px; bottom: 8px; width: 84px; height: 84px; cursor: pointer; }
+#hint { position: absolute; right: 12px; bottom: 9px; color: var(--muted); opacity: .7; font-size: 11px;
+  transition: opacity .6s; pointer-events: none; }
+body.used #hint { opacity: 0; }

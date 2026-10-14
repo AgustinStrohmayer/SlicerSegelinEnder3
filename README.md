@@ -44,6 +44,12 @@ rotate/auto-height/mirror/translate/align/reverse, manual Y/Z/diagonal
 cuts, Y×Z plate splitting, real-time simulation, and G-code export
 (standard, plate batch) plus modified-DXF export.
 
+The **Cut Lab** (`Simulate → Cut Lab`, `Ctrl+Shift+L`) models the hot wire cutting
+foam: wire temperature, kerf, contact, a 2-D thermal solve, prediction curves and
+calibration against your own test cuts. See [docs/guia-cut-lab.md](docs/guia-cut-lab.md)
+(quick guide, Spanish) and [docs/fisica-del-corte.md](docs/fisica-del-corte.md)
+(equations, validation and references, Spanish).
+
 Run the tests with `pytest` (install dev tools via
 `pip install -r requirements-dev.txt`).
 
