@@ -52,11 +52,33 @@ def build_cut_path(segments: list[Segment], reverse: bool = False) -> list[Segme
     used[best_idx] = True
     end_y, end_z = y2, z2
 
+    # Endpoints bucketed on a grid wider than the tolerance: the usual case (the next segment
+    # touches the tail) is found without scanning every segment (O(n) instead of O(n²)).
+    cell = _CHAIN_TOL * 4
+    grid: dict[tuple[int, int], list[int]] = {}
+    for i, (a1, b1, a2, b2) in enumerate(tuples):
+        for y, z in ((a1, b1), (a2, b2)):
+            grid.setdefault((round(y / cell), round(z / cell)), []).append(i)
+
+    def touching(y: float, z: float) -> tuple[int, bool] | None:
+        """The first unused segment (lowest index, start before end) within tolerance of (y, z)."""
+        gy, gz = round(y / cell), round(z / cell)
+        hits = {i for dy in (-1, 0, 1) for dz in (-1, 0, 1) for i in grid.get((gy + dy, gz + dz), ())
+                if not used[i]}
+        for i in sorted(hits):
+            a1, b1, a2, b2 = tuples[i]
+            if math.hypot(a1 - y, b1 - z) <= _CHAIN_TOL:
+                return i, False
+            if math.hypot(a2 - y, b2 - z) <= _CHAIN_TOL:
+                return i, True
+        return None
+
     for _ in range(len(tuples) - 1):
         chosen: int | None = None
         inv = False
         best_d: float | None = None
-        for i, (a1, b1, a2, b2) in enumerate(tuples):
+        hit = touching(end_y, end_z)
+        for i, (a1, b1, a2, b2) in enumerate(() if hit else tuples):
             if used[i]:
                 continue
             d1 = math.hypot(a1 - end_y, b1 - end_z)
@@ -70,6 +92,8 @@ def build_cut_path(segments: list[Segment], reverse: bool = False) -> list[Segme
             d = min(d1, d2)
             if best_d is None or d < best_d:
                 best_d, chosen, inv = d, i, (d2 < d1)
+        if hit:
+            chosen, inv = hit
         if chosen is None:
             break
         used[chosen] = True
@@ -145,3 +169,61 @@ def trajectory_durations(trajectory: list[Segment], speed_mm_s: float) -> list[f
 
 def total_duration(trajectory: list[Segment], speed_mm_s: float) -> float:
     return sum(trajectory_durations(trajectory, speed_mm_s))
+
+
+ENTRIES = ("side", "top")
+_TOP_CLEARANCE_MM = 5.0
+
+
+def _closed(cut: list[Segment]) -> bool:
+    return len(cut) > 2 and cut[0].a.distance_to(cut[-1].b) <= _CHAIN_TOL and all(
+        cut[i].b.distance_to(cut[i + 1].a) <= _CHAIN_TOL for i in range(len(cut) - 1))
+
+
+def build_block_trajectory(segments: list[Segment], block, *, entry: str = "side",  # type: ignore[no-untyped-def]
+                           reverse: bool = False) -> list[Segment]:
+    """The machine path for a profile inside a foam block, with the wire parked at the origin (0, 0).
+
+    The origin is in front of the block, level with its bottom face, so the wire
+    never starts under or inside the foam. ``entry`` picks how it gets in:
+
+    * ``"side"``: up in the air in front of the block, then straight in
+      (horizontally) to the profile's front-most point;
+    * ``"top"``: up above the block, over it, then straight down to the
+      profile's highest point.
+
+    It leaves the same way it came in and ends back at the origin. A closed
+    profile is started at that front-most / highest point, so the entry slit is
+    as short as possible.
+    """
+    cut = build_cut_path(segments, reverse=reverse)
+    if not cut:
+        return []
+    if _closed(cut):
+        key = (lambda s: (s.a.y, -s.a.z)) if entry == "side" else (lambda s: (-s.a.z, s.a.y))
+        i = min(range(len(cut)), key=lambda k: key(cut[k]))
+        cut = cut[i:] + cut[:i]
+    start, end = cut[0].a, cut[-1].b
+    o = Point(0.0, 0.0)
+    path: list[Segment] = []
+
+    def go(a: Point, b: Point, kind: SegmentKind) -> None:
+        if a.distance_to(b) > 1e-9:
+            path.append(Segment(a, b, kind))
+
+    if entry == "top":
+        top = max(block.z1, max(max(s.a.z, s.b.z) for s in cut)) + _TOP_CLEARANCE_MM
+        go(o, Point(0.0, top), SegmentKind.ENTRY)
+        go(Point(0.0, top), Point(start.y, top), SegmentKind.ENTRY)
+        go(Point(start.y, top), start, SegmentKind.ENTRY)
+        path += cut
+        go(end, Point(end.y, top), SegmentKind.EXIT)
+        go(Point(end.y, top), Point(0.0, top), SegmentKind.RETURN_H)
+        go(Point(0.0, top), o, SegmentKind.RETURN_V)
+    else:
+        go(o, Point(0.0, start.z), SegmentKind.ENTRY)
+        go(Point(0.0, start.z), start, SegmentKind.ENTRY)
+        path += cut
+        go(end, Point(0.0, end.z), SegmentKind.EXIT)
+        go(Point(0.0, end.z), o, SegmentKind.RETURN_V)
+    return path

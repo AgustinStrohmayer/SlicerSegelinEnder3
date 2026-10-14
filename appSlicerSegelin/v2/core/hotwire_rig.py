@@ -75,13 +75,13 @@ class HotWireRig:
         if d <= 0:
             return 0.0
         ang = math.radians(self.arm_angle_deg)
-        edge = 7.0 / max(1e-6, math.sin(ang))  # half arm width, measured horizontally
+        edge = self.arm_width / 2 / max(1e-6, math.sin(ang))  # half arm width, measured horizontally
         return max(0.0, (d - edge) * math.tan(ang))
 
     def usable_width(self, block_height: float) -> float:
         """Widest block (across the wire) whose ends clear both arms."""
         ang = math.radians(self.arm_angle_deg)
-        edge = 7.0 / max(1e-6, math.sin(ang))
+        edge = self.arm_width / 2 / max(1e-6, math.sin(ang))
         inset = edge + block_height / max(1e-6, math.tan(ang))
         return max(0.0, self.wire_span - 2.0 * inset)
 
@@ -99,6 +99,12 @@ class FoamBlock:
     spacer: float = 0.0    # board under the block so the arm tips clear the bed at the lowest pass
 
     @property
+    def span_x(self) -> float:
+        """Width the arms must clear: the block's farther end from the span centre, on both sides
+        (the arms are symmetric, so an off-centre block needs as much room as a wider centred one)."""
+        return self.width_x + 2 * abs(self.x_offset)
+
+    @property
     def y1(self) -> float:
         return self.y0 + self.length_y
 
@@ -106,6 +112,8 @@ class FoamBlock:
     def z1(self) -> float:
         return self.z0 + self.height_z
 
+
+DEFAULT_PRESET = "Ender-3 (long arms)"
 
 PRESETS: dict[str, HotWireRig] = {
     # Ender-3 / Ender-3 Pro: 220×220×250 build volume, arms of the FiubAero segelín.
@@ -125,18 +133,92 @@ PRESETS: dict[str, HotWireRig] = {
 def fit_block(toolpath: Toolpath, *, margin_y: float = 5.0, margin_z: float = 5.0, width_x: float = 150.0) -> FoamBlock:
     """Smallest block that contains the cut with margins.
 
-    If the path opens with a straight lead-in along +Y (what the slicer's
-    "entry" emits), the block's front face sits halfway along it so the wire
-    starts outside the foam.
+    The wire starts outside the foam: after any first climb, the first straight
+    move along +Y is the way in (a side entry), and the block's front face sits
+    on it, ``margin_y`` in (at most halfway). A path that goes up, over and
+    straight down (a top entry) leaves that travel above the block.
     """
-    y_min, y_max, z_min, z_max = toolpath.bounds()
+    moves = [m for m in toolpath.moves if abs(m.y1 - m.y0) + abs(m.z1 - m.z0) > 1e-9]
+    body = moves
+    top = len(moves) >= 3 and _top_entry(moves)
+    if top:
+        body = moves[3:]  # up, over, down: the cut starts where the descent ends
+        for _ in range(3):  # and leaves the same way: up, back over, down in front
+            if body and (abs(body[-1].y1 - body[-1].y0) < 1e-6 or abs(body[-1].z1 - body[-1].z0) < 1e-6):
+                body = body[:-1]
+    y_min, y_max, z_min, z_max = _bounds(body) if body else toolpath.bounds()
+    if top:
+        z_max = max(z_max, moves[2].z1)
     y0 = y_min - margin_y
-    if toolpath.moves:
-        first = toolpath.moves[0]
-        if abs(first.z1 - first.z0) < 1e-6 and first.y1 > first.y0:
-            y0 = first.y0 + min(margin_y, (first.y1 - first.y0) / 2.0)
-    return FoamBlock(length_y=max(1.0, y_max + margin_y - y0), height_z=max(1.0, z_max - z_min + margin_z),
-                     width_x=width_x, y0=y0, z0=z_min)
+    for m in [] if top else moves[:3]:
+        if abs(m.y1 - m.y0) < 1e-6:
+            continue  # a climb in front of the block
+        if abs(m.z1 - m.z0) < 1e-6 and m.y1 > m.y0:
+            y0 = m.y0 + min(margin_y, (m.y1 - m.y0) / 2.0)
+        break
+    z0 = min(0.0, z_min) if moves else z_min
+    return FoamBlock(length_y=max(1.0, y_max + margin_y - y0), height_z=max(1.0, z_max - z0 + margin_z),
+                     width_x=width_x, y0=y0, z0=z0)
+
+
+def _top_entry(moves) -> bool:  # type: ignore[no-untyped-def]
+    """Up, over, down: the wire reaches the profile from above the block."""
+    up, over, down = moves[0], moves[1], moves[2]
+    return (abs(up.y1 - up.y0) < 1e-6 and up.z1 > up.z0 and abs(over.z1 - over.z0) < 1e-6 and over.y1 != over.y0
+            and abs(down.y1 - down.y0) < 1e-6 and down.z1 < down.z0)
+
+
+def _bounds(moves) -> tuple[float, float, float, float]:  # type: ignore[no-untyped-def]
+    ys = [v for m in moves for v in (m.y0, m.y1)]
+    zs = [v for m in moves for v in (m.z0, m.z1)]
+    return min(ys), max(ys), min(zs), max(zs)
+
+
+def refit_block(block: FoamBlock, toolpath: Toolpath) -> FoamBlock:
+    """``block`` resized along Y and Z to the cut; its width, X offset and spacer are kept."""
+    if not toolpath.moves:
+        return block
+    fit = fit_block(toolpath, width_x=block.width_x)
+    return replace(block, length_y=fit.length_y, height_z=fit.height_z, y0=fit.y0, z0=fit.z0)
+
+
+def check_block(rig: HotWireRig, block: FoamBlock, *, worst_case: bool = True) -> list[str]:
+    """Problems with putting ``block`` on ``rig``.
+
+    ``worst_case`` (no cut yet): the wire may pass anywhere through the block, down
+    to its bottom face, so the whole block height must fit under the carriage and
+    between the arms. Once there is a cut, :func:`check_cut` checks those against
+    the real lowest pass instead.
+    """
+    issues: list[str] = []
+    w = block.span_x
+    off = f" ({block.width_x:.0f} mm, {abs(block.x_offset):.0f} mm off centre)" if abs(block.x_offset) > 0.05 else ""
+    if w > rig.wire_span - 1e-6:
+        issues.append(f"Width {w:.0f} mm{off}: longer than the wire ({rig.wire_span:.0f} mm between the arms).")
+    elif worst_case and w > rig.usable_width(block.height_z) + 1e-6:
+        issues.append(f"Width {w:.0f} mm{off}: at {block.height_z:.0f} mm tall the arms leave "
+                      f"{math.floor(rig.usable_width(block.height_z))} mm; the block's ends would hit them.")
+    if worst_case and block.height_z > rig.nozzle_clearance:
+        lo, hi = block.x_offset - block.width_x / 2, block.x_offset + block.width_x / 2
+        c_lo = rig.carriage_offset_x - rig.carriage_width / 2
+        c_hi = rig.carriage_offset_x + rig.carriage_width / 2
+        if hi > c_lo and lo < c_hi:
+            issues.append(f"Height {block.height_z:.0f} mm: the nozzle is {rig.nozzle_clearance:.0f} mm above the "
+                          "wire, so it hits the block when the wire cuts low. Use a lower block or longer arms.")
+    if block.spacer < rig.arm_reach_below_wire - 1e-6:
+        issues.append(f"Spacer {block.spacer:.0f} mm: the arm tips hang {rig.arm_reach_below_wire:.1f} mm below the "
+                      f"wire and hit the bed; use at least {math.ceil(rig.arm_reach_below_wire)} mm.")
+    if block.y0 < 1e-6:
+        issues.append(f"Front face at Y {block.y0:g} mm: the wire starts at Y 0, so it would start inside the foam. "
+                      "Move the block forward (front face at Y > 0).")
+    if block.length_y > rig.bed_y + 1e-6:
+        issues.append(f"Length {block.length_y:.0f} mm: overhangs the {rig.bed_y:.0f} mm bed.")
+    if rig.origin_y + block.y1 > rig.y_travel + 1e-6 or rig.origin_y + block.y0 < -1e-6:
+        issues.append(f"Length: the wire can't cross the whole block; the machine travels {rig.y_travel:.0f} mm "
+                      f"along Y and the block spans Y {block.y0:g}…{block.y1:g} mm.")
+    if rig.origin_z + block.z1 > rig.z_travel + 1e-6:
+        issues.append(f"Height: the wire can't reach the block's top ({rig.z_travel:.0f} mm of Z travel).")
+    return issues
 
 
 def check_cut(rig: HotWireRig, block: FoamBlock, toolpath: Toolpath) -> list[str]:
@@ -152,9 +234,14 @@ def check_cut(rig: HotWireRig, block: FoamBlock, toolpath: Toolpath) -> list[str
         )
     if rig.origin_z + z_min < -1e-6 or rig.origin_z + z_max > rig.z_travel + 1e-6:
         issues.append(f"Z travel: the path spans {z_min:.1f}…{z_max:.1f} mm, the machine has {rig.z_travel:.0f} mm.")
-    if block.width_x > rig.wire_span - 1e-6:
-        issues.append(f"Block width {block.width_x:.0f} mm exceeds the wire span ({rig.wire_span:.0f} mm).")
-    above = block.z1 - z_min
+    if block.span_x > rig.wire_span - 1e-6:
+        issues.append(f"Block width {block.span_x:.0f} mm exceeds the wire span ({rig.wire_span:.0f} mm).")
+    # Only passes through the block matter: the arms are in the wire's plane and the nozzle
+    # just above it, so they reach the foam only while the wire is under it (along Y).
+    pad = rig.carriage_depth / 2
+    z_arm = _lowest_z(toolpath, block.y0, block.y1)
+    z_noz = _lowest_z(toolpath, block.y0 - pad, block.y1 + pad)
+    above = block.z1 - (z_noz if z_noz is not None else block.z1)
     if above > rig.nozzle_clearance:
         lo, hi = block.x_offset - block.width_x / 2, block.x_offset + block.width_x / 2
         c_lo = rig.carriage_offset_x - rig.carriage_width / 2
@@ -164,9 +251,11 @@ def check_cut(rig: HotWireRig, block: FoamBlock, toolpath: Toolpath) -> list[str
                 f"The block rises {above:.1f} mm above the lowest wire position, but the carriage/nozzle "
                 f"is only {rig.nozzle_clearance:.1f} mm above the wire: they collide."
             )
-    if block.width_x > rig.usable_width(above) + 1e-6:
+    above_arm = block.z1 - (z_arm if z_arm is not None else block.z1)
+    if block.span_x > rig.usable_width(above_arm) + 1e-6:
         issues.append(
-            f"Block ends hit the arms: at {above:.0f} mm tall the usable width is {rig.usable_width(above):.0f} mm."
+            f"Block ends hit the arms: the wire passes {above_arm:.0f} mm below the block's top, where the arms "
+            f"leave {math.floor(rig.usable_width(above_arm))} mm (block needs {block.span_x:.0f} mm)."
         )
     low = bed_height(block, z_min)
     if low < rig.arm_reach_below_wire - 1e-6:
@@ -180,6 +269,22 @@ def check_cut(rig: HotWireRig, block: FoamBlock, toolpath: Toolpath) -> list[str
     if block.length_y > rig.bed_y + 1e-6:
         issues.append(f"Block length {block.length_y:.0f} mm overhangs the {rig.bed_y:.0f} mm bed.")
     return issues
+
+
+def _lowest_z(toolpath: Toolpath, y_lo: float, y_hi: float) -> float | None:
+    """Lowest wire height while the wire is between ``y_lo`` and ``y_hi`` (None: it never is)."""
+    best: float | None = None
+    for m in toolpath.moves:
+        a, b = (m.y0, m.y1) if m.y0 <= m.y1 else (m.y1, m.y0)
+        if b < y_lo or a > y_hi:
+            continue
+        if abs(m.y1 - m.y0) < 1e-9:
+            z = min(m.z0, m.z1)
+        else:  # the part of the move inside the band (z is linear in y: its lowest point is an end)
+            k = (m.z1 - m.z0) / (m.y1 - m.y0)
+            z = min(m.z0 + k * (max(a, y_lo) - m.y0), m.z0 + k * (min(b, y_hi) - m.y0))
+        best = z if best is None else min(best, z)
+    return best
 
 
 @dataclass(frozen=True, slots=True)

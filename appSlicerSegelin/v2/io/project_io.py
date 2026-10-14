@@ -7,11 +7,12 @@ ignored, missing ones fall back to defaults.
 from __future__ import annotations
 
 import json
-from dataclasses import asdict
+from dataclasses import asdict, fields
 from pathlib import Path as _Path
 
 from ..core.errors import ProjectIOError
 from ..core.geometry import Point, Segment, SegmentKind
+from ..core.hotwire_rig import PRESETS, FoamBlock, HotWireRig
 from ..core.machine import MachineProfile
 from ..core.manual_cuts import CutKind, ManualCut
 from ..core.project import SCHEMA_VERSION, Project, ViewState
@@ -35,6 +36,11 @@ def _project_payload(project: Project) -> dict:
         "auto_close_manual": project.auto_close_manual,
         "batch_basename": project.batch_basename,
         "source_dxf_name": project.source_dxf_name,
+        "rig": asdict(project.rig),
+        "block": asdict(project.block),
+        "block_auto": project.block_auto,
+        "block_created": project.block_created,
+        "entry": project.entry,
     }
 
 
@@ -94,7 +100,28 @@ def _project_from_data(data: dict) -> Project:
     project.batch_basename = str(data.get("batch_basename", "cut"))
     if data.get("source_dxf_name"):
         project.source_dxf_name = str(data["source_dxf_name"])
+    if data.get("entry") in ("side", "top"):
+        project.entry = str(data["entry"])
+    if isinstance(data.get("rig"), dict):
+        name = data["rig"].get("name")
+        project.rig = _dataclass_from(PRESETS.get(name, project.rig), data["rig"])  # type: ignore[arg-type]
+    if isinstance(data.get("block"), dict):
+        project.block = _dataclass_from(project.block, data["block"])
+        project.block_auto = bool(data.get("block_auto", False))
+        project.block_created = bool(data.get("block_created", True))
+    elif project.segments:  # saved before the block existed: keep it around the cut, as the simulator did
+        project.block_auto = project.block_created = True
     return project
+
+
+def _dataclass_from(default: HotWireRig | FoamBlock, data: dict) -> HotWireRig | FoamBlock:  # type: ignore[type-arg]
+    """``default`` with the known fields of ``data`` laid over it (unknown ones ignored)."""
+    known = {f.name for f in fields(default)}
+    values = asdict(default)
+    for key, val in data.items():
+        if key in known:
+            values[key] = str(val) if isinstance(values[key], str) else float(val)
+    return type(default)(**values)
 
 
 def _seg_to_json(s: Segment) -> dict[str, object]:

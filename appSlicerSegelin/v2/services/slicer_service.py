@@ -11,13 +11,30 @@ from ..core.geometry import Segment
 from ..core.machine import MachineProfile
 from ..core.plates import Layer, partition_by_manual_cuts, split_into_plates
 from ..core.project import Project
-from ..core.trajectory import build_full_trajectory
+from ..core.trajectory import build_block_trajectory, build_full_trajectory
 
 
 def standard_trajectory(project: Project) -> list[Segment]:
-    """Full machine trajectory (entry → cut → exit → returns) for the part."""
+    """Full machine trajectory (entry → cut → exit → returns) for the part.
+
+    Once the project has a foam block, the wire enters it from the side or the top
+    and never crosses the foam on its way in or out; before that, the legacy path.
+    """
     machine = project.machine_segments()
-    return build_full_trajectory(machine, add_unions=False, reverse=project.reverse_cut)
+    key = (tuple(machine), project.block_created, project.block if project.block_created else None,
+           project.entry, project.reverse_cut)
+    global _last_standard
+    if _last_standard is not None and _last_standard[0] == key:
+        return list(_last_standard[1])  # a block edit asks for it several times; it only changes with the key
+    if project.block_created:
+        out = build_block_trajectory(machine, project.block, entry=project.entry, reverse=project.reverse_cut)
+    else:
+        out = build_full_trajectory(machine, add_unions=False, reverse=project.reverse_cut)
+    _last_standard = (key, tuple(out))
+    return out
+
+
+_last_standard: tuple | None = None
 
 
 def build_layers(project: Project) -> list[Layer]:

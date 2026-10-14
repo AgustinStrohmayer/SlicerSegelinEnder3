@@ -17,10 +17,15 @@ from dataclasses import dataclass, field
 
 from .events import EventBus
 from .geometry import Segment
+from .hotwire_rig import DEFAULT_PRESET, PRESETS, FoamBlock, HotWireRig
 from .machine import MachineProfile
 from .manual_cuts import ManualCut
 
 SCHEMA_VERSION = 2
+
+# A typical slab of stock: 200 mm along the bed, 50 mm tall, 150 mm along the wire,
+# its front face 5 mm past the wire's parking spot, on a 10 mm board.
+DEFAULT_BLOCK = FoamBlock(length_y=200.0, height_z=50.0, width_x=150.0, y0=5.0, z0=0.0, spacer=10.0)
 
 
 @dataclass(slots=True)
@@ -55,6 +60,20 @@ class Project:
     auto_close_manual: bool = True
     manual_cuts: list[ManualCut] = field(default_factory=list)
 
+    # The hot-wire machine and the foam block, shared by the 3D view, the
+    # machine simulator and the Cut Lab. The workflow starts by creating the
+    # block (``block_created``) as the physical stock, then places the profile
+    # on it. While ``block_auto`` is on, the block instead follows the G-code
+    # (see ``hotwire_rig.refit_block``).
+    rig: HotWireRig = field(default_factory=lambda: PRESETS[DEFAULT_PRESET])
+    block: FoamBlock = field(default_factory=lambda: DEFAULT_BLOCK)
+    block_auto: bool = False
+    block_created: bool = False
+    # How the wire gets into the block from its parking spot at the origin:
+    # "side" (in front, then straight in) or "top" (over it, then down).
+    # Only used once the block exists; see ``trajectory.build_block_trajectory``.
+    entry: str = "side"
+
     # Export.
     batch_basename: str = "cut"
 
@@ -83,6 +102,39 @@ class Project:
             return
         self.offset_y = (self.area_y_mm / 2.0) - (bbox.width / 2.0) - bbox.min_y
         self.offset_z = (self.area_z_mm / 2.0) - (bbox.height / 2.0) - bbox.min_z
+
+    def center_on_block(self) -> None:
+        """Center the geometry in the foam block's Y–Z face."""
+        from .geometry import BBox
+
+        bbox = BBox.from_segments(self.segments)
+        if bbox is None:
+            return
+        b = self.block
+        self.offset_y = (b.y0 + b.y1) / 2.0 - (bbox.min_y + bbox.width / 2.0)
+        self.offset_z = (b.z0 + b.z1) / 2.0 - (bbox.min_z + bbox.height / 2.0)
+
+    def place_in_block(self, margin: float = 5.0) -> None:
+        """Put the profile in the block's front-top corner, ``margin`` mm from both faces.
+
+        Saves foam: the rest of the block stays in one piece for the next part. It
+        also keeps the wire high (the arms clear wider blocks) and the entry slit
+        short from either side. An axis where the profile doesn't fit is centred.
+        """
+        from .geometry import BBox
+
+        bbox = BBox.from_segments(self.segments)
+        if bbox is None:
+            return
+        b = self.block
+        if bbox.width + 2 * margin <= b.length_y:
+            self.offset_y = b.y0 + margin - bbox.min_y
+        else:
+            self.offset_y = (b.y0 + b.y1) / 2.0 - (bbox.min_y + bbox.width / 2.0)
+        if bbox.height + 2 * margin <= b.height_z:
+            self.offset_z = b.z1 - margin - (bbox.min_z + bbox.height)
+        else:
+            self.offset_z = (b.z0 + b.z1) / 2.0 - (bbox.min_z + bbox.height / 2.0)
 
     # ── mutations that emit events ────────────────────────────────────
     def replace_segments(self, segments: list[Segment]) -> None:
