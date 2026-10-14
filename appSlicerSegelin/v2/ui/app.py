@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import sys
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QGuiApplication
 from PyQt6.QtWidgets import QApplication
 
@@ -41,6 +41,8 @@ def run(argv: list[str]) -> int:
     apply_theme(app, initial_theme)
     window = MainWindow(initial_theme=initial_theme)
     window.show()
+    # The block, the printer and the wire are the workspace: start in the 3D view (once the window has a size).
+    QTimer.singleShot(0, lambda: window._view3d_action.setChecked(True))
     if "--selftest" in argv:
         _selftest(app, window)
     return app.exec()

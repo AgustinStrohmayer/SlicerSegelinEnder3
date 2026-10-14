@@ -17,6 +17,11 @@ animation and the checks:
 
 World frame (mm): X across the bed along the wire (0 = wire span centre),
 Y along the bed travel (0 = the wire's vertical plane), Z up (0 = bed top).
+
+Opened on the project (``linked``), the machine and the foam block are the
+project's: edits here go back through ``rig_edited`` / ``block_edited`` and
+show up in the main window's check, its 3D view and the Cut Lab. A G-code
+opened from a file gets a block of its own, fitted to it.
 """
 from __future__ import annotations
 
@@ -27,13 +32,12 @@ from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
-from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QColor, QTextCharFormat, QTextCursor
 from PyQt6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QDialog,
-    QDoubleSpinBox,
     QFileDialog,
     QFormLayout,
     QGroupBox,
@@ -49,9 +53,19 @@ from PyQt6.QtWidgets import (
 )
 
 from ....core.gcode_reader import Toolpath, parse_gcode
-from ....core.hotwire_rig import PRESETS, FoamBlock, HotWireRig, bed_height, check_cut, fit_block, machine_pose
+from ....core.hotwire_rig import (
+    DEFAULT_PRESET,
+    PRESETS,
+    FoamBlock,
+    HotWireRig,
+    bed_height,
+    check_cut,
+    fit_block,
+    machine_pose,
+)
 from ....core.machine_model import arm_mesh, load_machine_model, mount_mesh
 from ...theming.tokens import get_tokens
+from ..numfield import NumField
 from ..view3d import Scene3D
 from ..view3d.scene import BOX_FACES
 
@@ -96,14 +110,18 @@ def rig_points(rig: HotWireRig) -> dict[str, list[tuple[float, float]]]:
 class MachineSimulator(QWidget):
     """3D playback of a G-code on a parametric hot-wire printer, with its controls."""
 
+    rig_edited = pyqtSignal(object)    # HotWireRig, after a user edit
+    block_edited = pyqtSignal(object)  # FoamBlock, after a user edit of the project's block
+
     def __init__(self, parent: QWidget | None = None, theme: str = "dark") -> None:
         super().__init__(parent)
         self._theme = theme
         self._c = get_tokens(theme).color  # type: ignore[arg-type]
-        self.rig: HotWireRig = PRESETS["Ender-3 (long arms)"]
+        self.rig: HotWireRig = PRESETS[DEFAULT_PRESET]
         self.toolpath: Toolpath = parse_gcode("")
         self.block = FoamBlock(spacer=10.0)
         self.name = ""
+        self.linked = False  # showing the project's G-code: block edits belong to the project
         self.t = 0.0
         self._last = 0.0
         self._bed_items: list = []
@@ -138,16 +156,22 @@ class MachineSimulator(QWidget):
         self._timer = QTimer(self)
         self._timer.setInterval(30)
         self._timer.timeout.connect(self._tick)
-        self._apply_preset("Ender-3 (long arms)")
+        self._apply_preset(DEFAULT_PRESET, emit=False)
 
     # ── public API ────────────────────────────────────────────────────
-    def load_text(self, text: str, name: str = "G-code") -> None:
+    def load_text(self, text: str, name: str = "G-code", block: FoamBlock | None = None) -> None:
+        """Show ``text``. With ``block`` (the project's) the simulator is linked to the project;
+        without, it fits a block of its own to the G-code."""
         self.toolpath = parse_gcode(text)
         self.name = name
         self.code.setPlainText(text)
-        if self.toolpath.moves:
+        self.linked = block is not None
+        if block is not None:
+            self.block = block
+        elif self.toolpath.moves:
             self.block = replace(fit_block(self.toolpath, width_x=min(150.0, self.rig.usable_width(30.0))),
                                  spacer=self.block.spacer)
+        self.block_box.setTitle("Foam block — the project's" if self.linked else "Foam block — this G-code only")
         self._sync_block_controls()
         self.t = 0.0
         self._rebuild()
@@ -159,6 +183,7 @@ class MachineSimulator(QWidget):
 
     def set_rig(self, rig: HotWireRig) -> None:
         self.rig = rig
+        self._sync_rig_controls()
         self._rebuild()
         self._set_time(self.t)
 
@@ -189,14 +214,9 @@ class MachineSimulator(QWidget):
         row.addWidget(self.clock)
         return row
 
-    def _spin(self, lo: float, hi: float, val: float, step: float = 1.0, suffix: str = " mm") -> QDoubleSpinBox:
-        s = QDoubleSpinBox()
-        s.setRange(lo, hi)
-        s.setDecimals(1)
-        s.setSingleStep(step)
+    def _spin(self, lo: float, hi: float, val: float, step: float = 1.0, suffix: str = " mm") -> NumField:
+        s = NumField(lo=lo, hi=hi, step=step, suffix=suffix)
         s.setValue(val)
-        s.setSuffix(suffix)
-        s.setKeyboardTracking(False)
         return s
 
     def _build_panel(self) -> QWidget:
@@ -236,7 +256,9 @@ class MachineSimulator(QWidget):
         f.addRow(self.rig_info)
         v.addWidget(g)
 
-        g = QGroupBox("Foam block (G-code coordinates)")
+        g = self.block_box = QGroupBox("Foam block — this G-code only")
+        g.setToolTip("In G-code coordinates. Opened from the main window, this is the project's block:\n"
+                     "edits here change it everywhere (main window, 3D view, Cut Lab).")
         f = QFormLayout(g)
         self.sp_len = self._spin(5, 1000, 220)
         self.sp_h = self._spin(5, 500, 20)
@@ -251,7 +273,7 @@ class MachineSimulator(QWidget):
             f.addRow(label, sp)
             sp.valueChanged.connect(self._on_block_edit)
         fit = QPushButton("Fit block to G-code")
-        fit.clicked.connect(lambda: self.set_block(
+        fit.clicked.connect(lambda: self._user_block(
             replace(fit_block(self.toolpath, width_x=self.sp_w.value()), spacer=self.sp_spacer.value())))
         f.addRow(fit)
         v.addWidget(g)
@@ -270,19 +292,22 @@ class MachineSimulator(QWidget):
         v.addWidget(self.code, 1)
         return panel
 
-    def _apply_preset(self, name: str) -> None:
-        self.rig = PRESETS[name]
+    def _apply_preset(self, name: str, emit: bool = True) -> None:
+        self.set_rig(PRESETS[name])
+        if emit:
+            self.rig_edited.emit(self.rig)
+
+    def _sync_rig_controls(self) -> None:
         self._syncing = True
         for sp, val in ((self.sp_ang, self.rig.arm_angle_deg), (self.sp_low, self.rig.arm_lower_length),
                         (self.sp_up, self.rig.arm_upper_length), (self.sp_piv, self.rig.pivot_spacing),
                         (self.sp_ytr, self.rig.y_travel), (self.sp_ztr, self.rig.z_travel)):
             sp.setValue(val)
         self._syncing = False
-        if self.preset.currentText() != name:
+        if self.rig.name in PRESETS and self.preset.currentText() != self.rig.name:
             self.preset.blockSignals(True)
-            self.preset.setCurrentText(name)
+            self.preset.setCurrentText(self.rig.name)
             self.preset.blockSignals(False)
-        self.set_rig(self.rig)
 
     def _on_rig_edit(self) -> None:
         if self._syncing:
@@ -290,6 +315,12 @@ class MachineSimulator(QWidget):
         self.set_rig(replace(self.rig, arm_angle_deg=self.sp_ang.value(), arm_lower_length=self.sp_low.value(),
                              arm_upper_length=self.sp_up.value(), pivot_spacing=self.sp_piv.value(),
                              y_travel=self.sp_ytr.value(), z_travel=self.sp_ztr.value()))
+        self.rig_edited.emit(self.rig)
+
+    def _user_block(self, block: FoamBlock) -> None:
+        self.set_block(block)
+        if self.linked:
+            self.block_edited.emit(self.block)
 
     def _sync_block_controls(self) -> None:
         self._syncing = True
@@ -302,11 +333,9 @@ class MachineSimulator(QWidget):
     def _on_block_edit(self) -> None:
         if self._syncing:
             return
-        self.block = FoamBlock(length_y=self.sp_len.value(), height_z=self.sp_h.value(), width_x=self.sp_w.value(),
-                               y0=self.sp_y0.value(), z0=self.sp_z0.value(), x_offset=self.block.x_offset,
-                               spacer=self.sp_spacer.value())
-        self._rebuild()
-        self._set_time(self.t)
+        self._user_block(FoamBlock(length_y=self.sp_len.value(), height_z=self.sp_h.value(),
+                                   width_x=self.sp_w.value(), y0=self.sp_y0.value(), z0=self.sp_z0.value(),
+                                   x_offset=self.block.x_offset, spacer=self.sp_spacer.value()))
 
     def _on_open(self) -> None:
         path, _ = QFileDialog.getOpenFileName(self, "Open G-code", filter="G-code (*.gcode *.nc *.txt);;All files (*)")
@@ -526,7 +555,7 @@ class MachineSimDialog(QDialog):
 
     def __init__(self, parent: QWidget | None = None, theme: str = "dark") -> None:
         super().__init__(parent)
-        self.setWindowTitle("Hot-wire machine simulator")
+        self.setWindowTitle("Step 3 · Machine simulator — collisions and travel")
         self.resize(1320, 820)
         self.sim = MachineSimulator(self, theme)
         lay = QVBoxLayout(self)

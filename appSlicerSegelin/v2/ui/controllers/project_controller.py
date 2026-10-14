@@ -14,7 +14,9 @@ from PyQt6.QtCore import QObject, pyqtSignal
 from ...core import transforms
 from ...core.commands import CommandStack, FunctionCommand
 from ...core.errors import SlicerError
+from ...core.gcode_reader import Toolpath, parse_gcode
 from ...core.geometry import BBox, Point, Segment
+from ...core.hotwire_rig import FoamBlock, HotWireRig, check_block, check_cut, refit_block
 from ...core.manual_cuts import CutKind, make_two_point_cut, make_y_cut, make_z_cut
 from ...core.part_settings import PartSettings
 from ...core.plates import Layer
@@ -34,6 +36,8 @@ class ProjectController(QObject):
     info_changed = pyqtSignal()
     # Emitted when a per-part setting changes (colour/enabled/speed/…).
     parts_changed = pyqtSignal()
+    # Emitted when the machine, the foam block or the machine check change.
+    setup_changed = pyqtSignal()
 
     def __init__(self, project: Project | None = None) -> None:
         super().__init__()
@@ -45,6 +49,11 @@ class ProjectController(QObject):
         self.pending_diagonal: Point | None = None
         # Bytes of the original DXF, kept around so .ssproj saves embed it.
         self._source_dxf_bytes: bytes | None = None
+        # The project's G-code as the machine runs it, and what check_cut says about it.
+        self.gcode_text = ""
+        self.toolpath: Toolpath = parse_gcode("")
+        self.cut_issues: list[str] = []
+        self.block_issues: list[str] = []  # the block on the machine, before any cut
 
     # ── helpers ───────────────────────────────────────────────────────
     @property
@@ -102,11 +111,17 @@ class ProjectController(QObject):
             self.project.source_dxf_name,
         )
         new_name = Path(path).name
+        made_block = not self.project.block_created  # step 1 skipped: wrap a block around the profile
 
         def do() -> None:
             self.project.segments = list(segments)
             self.project.source_dxf_name = new_name
-            self.project.center_on_bed()
+            if made_block:
+                self.project.block_created = self.project.block_auto = True
+            if self.project.block_created and not self.project.block_auto:
+                self.project.place_in_block()  # front-top corner: the rest of the stock stays usable
+            else:
+                self.project.center_on_bed()
             self._invalidate_layers()
             self.changed.emit()
             self.info_changed.emit()
@@ -118,11 +133,15 @@ class ProjectController(QObject):
                 self.project.offset_z,
                 self.project.source_dxf_name,
             ) = list(prev[0]), prev[1], prev[2], prev[3]
+            if made_block:
+                self.project.block_created = self.project.block_auto = False
             self.changed.emit()
             self.info_changed.emit()
 
         self.history.push(FunctionCommand("Import DXF", do, undo))
         self.notify.emit("DXF imported", f"{len(segments)} segments", "success")
+        if made_block:
+            self.notify.emit("Foam block created", "Sized around the profile; adjust it in step 1.", "info")
 
     # ── transforms ────────────────────────────────────────────────────
     def rotate(self, deg: float) -> None:
@@ -189,6 +208,34 @@ class ProjectController(QObject):
             self.changed.emit()
 
         self.history.push(FunctionCommand("Align origin to cut", do, undo))
+
+    def center_on_block(self) -> None:
+        """Move the profile to the middle of the foam block's Y–Z face."""
+        self._place("Center on block", self.project.center_on_block)
+
+    def place_in_block(self) -> None:
+        """Move the profile to the block's front-top corner (least foam used)."""
+        self._place("Place in block corner", self.project.place_in_block)
+
+    def _place(self, label: str, move) -> None:  # type: ignore[no-untyped-def]
+        if not self.has_geometry:
+            return
+        prev = (self.project.offset_y, self.project.offset_z)
+        move()
+        nxt = (self.project.offset_y, self.project.offset_z)
+        self.project.offset_y, self.project.offset_z = prev
+        if nxt == prev:
+            return
+
+        def do() -> None:
+            self.project.offset_y, self.project.offset_z = nxt
+            self.changed.emit()
+
+        def undo() -> None:
+            self.project.offset_y, self.project.offset_z = prev
+            self.changed.emit()
+
+        self.history.push(FunctionCommand(label, do, undo))
 
     def toggle_reverse(self) -> None:
         if not self.has_geometry:
@@ -348,8 +395,19 @@ class ProjectController(QObject):
 
     # ── parameters ────────────────────────────────────────────────────
     def set_speed(self, value: float) -> None:
-        self.project.speed_mm_s = max(0.0, value)
+        value = max(0.0, value)
+        if value == self.project.speed_mm_s:
+            return
+        self.project.speed_mm_s = value
+        if self.has_geometry:
+            self.update_cut_check()  # the G-code carries the feed
         self.info_changed.emit()
+
+    def apply_cut_settings(self, settings) -> None:  # type: ignore[no-untyped-def]
+        """The Cut Lab's saved work settings (``core.cut_profile.WorkSettings``): its feed becomes the work speed."""
+        self.cut_settings = settings
+        if settings is not None and settings.work_feed_mm_s > 0:
+            self.set_speed(settings.work_feed_mm_s)
 
     def set_area(self, area_y: float, area_z: float) -> None:
         self.project.area_y_mm = max(0.0, area_y)
@@ -547,6 +605,90 @@ class ProjectController(QObject):
             return False
         self._invalidate_layers()
         return True
+
+    # ── machine & foam block (shared by the 3D view, simulator and Cut Lab) ──
+    def update_cut_check(self) -> None:
+        """Rebuild the project's G-code, refit the block if it follows the cut, and re-check it on the machine."""
+        p = self.project
+        self.gcode_text = gcode_service.export_standard(p) if self.has_geometry else ""
+        self.toolpath = parse_gcode(self.gcode_text)
+        if p.block_auto:
+            p.block = refit_block(p.block, self.toolpath)
+        # with a cut, its real lowest pass (check_cut) replaces the worst-case height checks
+        self.block_issues = check_block(p.rig, p.block, worst_case=not self.toolpath.moves) if p.block_created else []
+        self.cut_issues = check_cut(p.rig, p.block, self.toolpath) + self.toolpath.warnings if self.toolpath.moves else []
+        self.setup_changed.emit()
+
+    # Every machine / block / entry change is one undo step; quick repeats of the same
+    # edit (a spin box held down) merge into it.
+    _MERGE_S = 1.5
+
+    def _setup_state(self) -> tuple:
+        p = self.project
+        return p.rig, p.block, p.block_auto, p.block_created, p.entry
+
+    def _apply_setup(self, state: tuple) -> None:
+        p = self.project
+        entry_changed = state[4] != p.entry
+        p.rig, p.block, p.block_auto, p.block_created, p.entry = state
+        self.update_cut_check()
+        if entry_changed:
+            self.changed.emit()  # the cut path itself changed
+
+    def _push_setup(self, label: str, state: tuple) -> None:
+        import time
+
+        prev = self._setup_state()
+        if state == prev:
+            return
+        now = time.monotonic()
+        last = getattr(self, "_last_setup", None)
+        top = self.history._undo[-1] if self.history._undo else None
+        if last and last[0] == label and last[2] is top and now - last[1] < self._MERGE_S:
+            prev = last[3]  # extend the previous step instead of adding one
+            self.history._undo.pop()
+        cmd = FunctionCommand(label, lambda st=state: self._apply_setup(st), lambda st=prev: self._apply_setup(st))
+        self.history.push(cmd)
+        self._last_setup = (label, now, cmd, prev)
+
+    def set_rig(self, rig: HotWireRig) -> None:
+        if rig != self.project.rig:
+            st = self._setup_state()
+            self._push_setup("Change machine", (rig, *st[1:]))
+
+    def set_block(self, block: FoamBlock) -> None:
+        """A block edited by hand. Moving or resizing it along Y/Z stops it following the G-code;
+        its width, X offset and spacer can change either way."""
+        old = self.project.block
+        if block == old:
+            return
+        rig, _, auto, created, entry = self._setup_state()
+        if (block.length_y, block.height_z, block.y0, block.z0) != (old.length_y, old.height_z, old.y0, old.z0):
+            auto = False
+        self._push_setup("Edit foam block", (rig, block, auto, created, entry))
+
+    def create_block(self) -> None:
+        """Step 1: the stock is on the bed. Its size is then edited live (``set_block``)."""
+        if not self.project.block_created:
+            rig, block, auto, _, entry = self._setup_state()
+            self._push_setup("Create foam block", (rig, block, auto, True, entry))
+
+    def set_block_auto(self, on: bool) -> None:
+        """Fit the block to the cut, or stop: turning it off brings back the block the user had."""
+        p = self.project
+        if on == p.block_auto:
+            return
+        rig, block, _, created, entry = self._setup_state()
+        if on:
+            self._manual_block = block
+        else:
+            block = getattr(self, "_manual_block", None) or block
+        self._push_setup("Fit block to the cut" if on else "Stop fitting the block", (rig, block, on, created, entry))
+
+    def set_entry(self, entry: str) -> None:
+        """How the wire gets into the block: "side" or "top"."""
+        if entry in ("side", "top") and entry != self.project.entry:
+            self._push_setup("Wire entry", (*self._setup_state()[:4], entry))
 
     # ── project archive (.ssproj) ────────────────────────────────────
     def save_project_archive(self, path: str, scene=None) -> bool:  # type: ignore[no-untyped-def]

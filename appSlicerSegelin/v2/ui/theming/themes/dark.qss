@@ -636,3 +636,53 @@ QLabel#FieldLabel {
     font-weight: 700;
     letter-spacing: 0.5px;
 }
+
+/* ============== WORKFLOW STEPS ============== */
+QFrame#StepsBar {
+    background: {{color.surface}};
+    border-bottom: 1px solid {{color.border}};
+}
+QToolButton#StepChip {
+    background: {{color.surface_alt}};
+    border: 1px solid {{color.border_strong}};
+    border-radius: {{radius.md}}px;
+    color: {{color.muted}};
+    font-size: {{typography.size_small}}px;
+    padding: 3px 0px;
+}
+QToolButton#StepChip:hover { border-color: {{color.accent}}; }
+QToolButton#StepChip[state="current"] {
+    background: {{color.accent_soft}};
+    border: 1px solid {{color.accent}};
+    color: {{color.text}};
+    font-weight: 700;
+}
+QToolButton#StepChip[state="done"] { border-color: {{color.success}}; color: {{color.success}}; }
+QToolButton#StepChip[state="warn"] { border-color: {{color.warning}}; color: {{color.warning}}; font-weight: 700; }
+QToolButton#StepChip[active="true"] { background: {{color.accent_soft}}; border: 2px solid {{color.accent}}; }
+QToolButton#StepChip:disabled { color: {{color.border_strong}}; border-style: dashed; }
+QLabel#StepHint { color: {{color.text}}; font-size: {{typography.size_small}}px; }
+
+QLabel#CheckStatus { font-size: {{typography.size_small}}px; padding: 6px 8px; border-radius: {{radius.md}}px; }
+QLabel#CheckStatus[state="ok"] { color: {{color.success}}; border: 1px solid {{color.success}}; }
+QLabel#CheckStatus[state="warn"] { color: {{color.warning}}; border: 1px solid {{color.warning}}; }
+QLabel#CheckStatus[state="idle"] { color: {{color.muted}}; border: 1px solid {{color.border}}; }
+QStatusBar QToolButton#CheckChip { border: none; background: transparent; padding: 0 6px; }
+QStatusBar QToolButton#CheckChip[state="ok"] { color: {{color.success}}; }
+QStatusBar QToolButton#CheckChip[state="warn"] { color: {{color.warning}}; font-weight: 700; }
+
+/* ============== NUMBER FIELDS (big − / + steppers) ============== */
+QToolButton#NumStep {
+    min-width: 30px; max-width: 30px; min-height: 30px;
+    background: {{color.surface_alt}};
+    border: 1px solid {{color.border_strong}};
+    border-radius: {{radius.md}}px;
+    color: {{color.text}};
+    font-size: 16px; font-weight: 700;
+}
+QToolButton#NumStep:hover { border-color: {{color.accent}}; color: {{color.accent}}; }
+QToolButton#NumStep:pressed { background: {{color.accent_soft}}; }
+QToolButton#NumStep:disabled { color: {{color.muted}}; border-color: {{color.border}}; }
+QDoubleSpinBox#NumValue { min-height: 30px; padding: 0 4px; }
+QToolButton#FoldToggle { border: none; background: transparent; color: {{color.muted}}; padding: 2px 0; text-align: left; }
+QToolButton#FoldToggle:hover { color: {{color.accent}}; }

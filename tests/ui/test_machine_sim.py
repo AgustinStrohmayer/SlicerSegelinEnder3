@@ -55,5 +55,7 @@ def test_main_window_simulates_project(app, tmp_path):
     doc.saveas(path)
     w = MainWindow()
     w.controller.import_dxf(str(path))
-    w._on_simulate_project()
-    assert w._sim_dialog.sim.toolpath.moves
+    w._on_simulate_project()  # plays the cut in the main 3D view (no separate window)
+    assert w._sim_timer.isActive() and w._viewer3d is not None and w._view3d
+    assert w._canvas_stack.currentWidget() is w._viewer3d
+    w._sim_timer.stop()

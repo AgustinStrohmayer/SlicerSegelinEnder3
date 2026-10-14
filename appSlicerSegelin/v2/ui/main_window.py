@@ -1,8 +1,14 @@
 """Main application window.
 
-Assembles the sidebar (all transform/cut/export controls), the central
-canvas, the bottom simulation timeline, toolbar, menus, command palette
-and toast notifications, and wires them to a :class:`ProjectController`.
+Assembles the sidebar (all transform/cut/export controls, under the
+five-step workflow strip), the central canvas, the bottom simulation
+timeline, toolbar, menus, command palette and toast notifications, and
+wires them to a :class:`ProjectController`.
+
+The machine and the foam block live in the project; this window keeps the
+3D view, the machine simulator and the Cut Lab showing the same ones and
+shows :func:`~..core.hotwire_rig.check_cut`'s warnings (sidebar step 3 and
+the status bar).
 """
 from __future__ import annotations
 
@@ -19,6 +25,7 @@ from PyQt6.QtWidgets import (
     QStackedWidget,
     QToolBar,
     QToolButton,
+    QVBoxLayout,
     QWidget,
 )
 
@@ -110,6 +117,7 @@ class MainWindow(QMainWindow):
         # Docks
         self._build_sidebar()
         self._build_timeline()
+        self._load_cut_settings()
 
         # Chrome
         self._build_toolbar()
@@ -146,6 +154,14 @@ class MainWindow(QMainWindow):
         self.controller.changed.connect(self.parts_grid.refresh)
         self.controller.changed.connect(self._on_changed_viewer3d)
         self.controller.notify.connect(self._on_notify)
+        # Machine check: re-run (debounced) when the geometry changes, then show it everywhere.
+        self._check_timer = QTimer(self)
+        self._check_timer.setSingleShot(True)
+        self._check_timer.setInterval(150)
+        self._check_timer.timeout.connect(self.controller.update_cut_check)
+        self.controller.changed.connect(self._check_timer.start)
+        self.controller.setup_changed.connect(self._on_setup_changed)
+        self._had_issues = False
 
         # Canvas readouts — connected now that the status bar exists.
         self.view.cursorMoved.connect(self._on_cursor_moved)
@@ -159,9 +175,10 @@ class MainWindow(QMainWindow):
         self._recolor_icons()
         self._refresh_canvas()
         self._refresh_info()
+        self.controller.update_cut_check()
         # Frame the work area once the window has a real size.
         QTimer.singleShot(0, self.view.fit_to_content)
-        self.toasts.show_toast("Welcome", "Load a DXF (Ctrl+O) — Ctrl+K for commands.", "info")
+        self.toasts.show_toast("Welcome", "Step 1: create the foam block on the printer (sidebar).", "info")
 
     # ── docks ─────────────────────────────────────────────────────────
     def _build_sidebar(self) -> None:
@@ -173,9 +190,21 @@ class MainWindow(QMainWindow):
         self.sidebar.export_part_requested.connect(self._on_export_part)
         self.sidebar.diagonal_requested.connect(self._start_diagonal_pick)
         self.sidebar.place_cut_requested.connect(self._start_place_cut)
+        self.sidebar.view3d_requested.connect(lambda: self._view3d_action.setChecked(True))
+        self.sidebar.simulate_requested.connect(self._on_simulate_project)
+        self.sidebar.cut_lab_requested.connect(self._on_cut_lab)
+        self.sidebar.step_shown.connect(self._on_step_shown)
+        # The workflow strip stays above the scrolling sections.
+        panel = QWidget(self)
+        panel.setObjectName("SidebarBody")
+        lay = QVBoxLayout(panel)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(0)
+        lay.addWidget(self.sidebar.steps)
+        lay.addWidget(self.sidebar, 1)
         dock = QDockWidget("Workspace", self)
         dock.setObjectName("SidebarDock")
-        dock.setWidget(self.sidebar)
+        dock.setWidget(panel)
         dock.setFeatures(QDockWidget.DockWidgetFeature.DockWidgetMovable | QDockWidget.DockWidgetFeature.DockWidgetFloatable)
         dock.setMinimumWidth(320)
         self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, dock)
@@ -328,10 +357,10 @@ class MainWindow(QMainWindow):
         add(m, "Keyboard shortcuts…", self._open_shortcuts_overlay)
 
         m = mb.addMenu("&Simulate")
-        add(m, "Simulate project on the machine", self._on_simulate_project, "Ctrl+Shift+M")
+        add(m, "Step 3 · Simulate project on the machine", self._on_simulate_project, "Ctrl+Shift+M")
         add(m, "Open G-code in machine simulator…", self._on_simulate_gcode_file)
         m.addSeparator()
-        add(m, "Cut Lab (wire–foam physics)…", self._on_cut_lab, "Ctrl+Shift+L")
+        add(m, "Step 4 · Cut Lab (wire temperature, feed, kerf)", self._on_cut_lab, "Ctrl+Shift+L")
 
     def _build_status_bar(self) -> None:
         from PyQt6.QtWidgets import QLabel
@@ -348,7 +377,13 @@ class MainWindow(QMainWindow):
         self._status_zoom.setProperty("role", "mono")
         self._status_offset = QLabel("Δ 0.0, 0.0")
         self._status_offset.setProperty("role", "mono")
+        self._status_check = QToolButton(self)
+        self._status_check.setObjectName("CheckChip")
+        self._status_check.setToolTip("Machine check (sidebar steps 1 and 3)")
+        self._status_check.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._status_check.clicked.connect(self._show_problems)
         for w in (
+            self._status_check,
             self._status_state,
             self._status_coord,
             self._status_offset,
@@ -431,8 +466,8 @@ class MainWindow(QMainWindow):
 
     def _on_export_gcode(self) -> None:
         path, _ = QFileDialog.getSaveFileName(self, "Export G-code", filter="G-code (*.gcode)")
-        if path:
-            self.controller.export_standard_gcode(path)
+        if path and self.controller.export_standard_gcode(path):
+            self.sidebar.mark_visited(5)
 
     def _on_export_dxf(self) -> None:
         path, _ = QFileDialog.getSaveFileName(self, "Export modified DXF", filter="DXF (*.dxf)")
@@ -441,15 +476,15 @@ class MainWindow(QMainWindow):
 
     def _on_export_batch(self) -> None:
         folder = QFileDialog.getExistingDirectory(self, "Select folder for plate batch")
-        if folder:
-            self.controller.export_layers_gcode(folder)
+        if folder and self.controller.export_layers_gcode(folder):
+            self.sidebar.mark_visited(5)
 
     def _on_export_part(self, index: int) -> None:
         label = self.controller.part_label(index)
         suggested = f"{self.controller.project.batch_basename or 'cut'}_{label.replace(' ', '')}.gcode"
         path, _ = QFileDialog.getSaveFileName(self, "Export part G-code", suggested, filter="G-code (*.gcode)")
-        if path:
-            self.controller.export_part_gcode(index, path)
+        if path and self.controller.export_part_gcode(index, path):
+            self.sidebar.mark_visited(5)
 
     def _on_save_archive(self) -> None:
         suggested = self.controller.project.source_dxf_name or "project"
@@ -559,7 +594,71 @@ class MainWindow(QMainWindow):
             QTimer.singleShot(0, self.view.fit_to_content)
         self.statusBar().showMessage(f"View: {mode}", 1500)
 
-    # ── 3D slicer view ────────────────────────────────────────────────
+    # ── machine & foam block, shared by the 3D view, simulator and Cut Lab ──
+    def _flush_check(self) -> None:
+        """Run a pending machine check now (a window is about to read the project's block)."""
+        if self._check_timer.isActive():
+            self._check_timer.stop()
+            self.controller.update_cut_check()
+
+    def _gcode_name(self) -> str:
+        return Path(self.controller.project.source_dxf_name or "project").stem + ".gcode"
+
+    def _show_problems(self) -> None:
+        """Status bar chip: open the step with the problems (the block's first, then the cut's)."""
+        c = self.controller
+        self.sidebar.show_step(1 if c.block_issues or not c.cut_issues else 3)
+
+    def _viewer_setup(self) -> tuple:
+        c = self.controller
+        p = c.project
+        return p.rig, p.block, p.block_created, bool(c.block_issues or c.cut_issues)
+
+    def _on_setup_changed(self) -> None:
+        c = self.controller
+        p = c.project
+        problems = c.block_issues + c.cut_issues
+        n = len(problems)
+        if not p.block_created:
+            state, text = "idle", ""
+        elif n:
+            state, text = "warn", f"⚠ {n} machine problem{'s' if n > 1 else ''}"
+        else:
+            state, text = "ok", "✓ Fits the machine"
+        self._status_check.setText(text)
+        self._status_check.setVisible(bool(text))
+        self._status_check.setToolTip("\n".join(problems) or "Machine check (sidebar steps 1 and 3)")
+        if self._status_check.property("state") != state:
+            self._status_check.setProperty("state", state)
+            self._status_check.style().unpolish(self._status_check)
+            self._status_check.style().polish(self._status_check)
+        if n and not self._had_issues:
+            self.toasts.show_toast(f"⚠ {n} problem{'s' if n > 1 else ''} on the machine",
+                                   "See the sidebar (or click the status bar).", "warning",
+                                   duration_ms=7000)
+        self._had_issues = bool(n)
+
+        if self._viewer3d is not None:
+            self._viewer3d.set_setup(*self._viewer_setup())
+            if self._viewer_visible():
+                self._refresh_viewer3d(full=False)
+        dlg = getattr(self, "_sim_dialog", None)
+        if dlg is not None:
+            sim = dlg.sim
+            if sim.rig != p.rig:
+                sim.set_rig(p.rig)
+            if sim.linked and c.gcode_text and c.gcode_text != sim.code.toPlainText():
+                sim.load_text(c.gcode_text, self._gcode_name(), block=p.block)
+            elif sim.linked and sim.block != p.block:
+                sim.set_block(p.block)
+        lab = getattr(self, "_cut_lab", None)
+        if lab is not None:
+            lab.set_rig(p.rig)
+            if lab.linked and c.gcode_text and lab.toolpath.moves != c.toolpath.moves:
+                lab.load_text(c.gcode_text, self._gcode_name(), block=p.block)
+            elif lab.linked and lab.block != p.block:
+                lab.set_block(p.block)
+
     def _machine_sim(self):  # type: ignore[no-untyped-def]
         """The machine simulator window (created on first use; OpenGL may be missing)."""
         dlg = getattr(self, "_sim_dialog", None)
@@ -571,20 +670,28 @@ class MainWindow(QMainWindow):
             except Exception as exc:  # OpenGL/pyqtgraph unavailable on this machine
                 self.toasts.show_toast("Machine simulator unavailable", str(exc), "warning")
                 return None
+            dlg.sim.set_rig(self.controller.project.rig)
+            dlg.sim.rig_edited.connect(self.controller.set_rig)
+            dlg.sim.block_edited.connect(self.controller.set_block)
         dlg.show()
         dlg.raise_()
         return dlg.sim
 
     def _on_simulate_project(self) -> None:
+        """Play the cut from the start in the main 3D view (the machine, the block and the wire)."""
         if not self.controller.has_geometry:
             self.toasts.show_toast("Nothing to simulate", "Import a DXF first.", "info")
             return
-        from ..services import gcode_service
-
-        sim = self._machine_sim()
-        if sim is not None:
-            name = Path(self.controller.project.source_dxf_name or "project").stem + ".gcode"
-            sim.load_text(gcode_service.export_standard(self.controller.project), name)
+        self._flush_check()
+        if self.sidebar.active_step == 4:
+            self.sidebar.show_step(3)
+        if not self._view3d_action.isChecked():
+            self._view3d_action.setChecked(True)
+        self._show_workspace()
+        self.timeline.set_progress_fraction(0.0)
+        self.timeline.set_play_state(True)
+        self._on_play_toggled(True)
+        self.sidebar.mark_visited(3)
 
     def _on_simulate_gcode_file(self) -> None:
         path, _ = QFileDialog.getOpenFileName(self, "Open G-code", filter="G-code (*.gcode *.nc *.txt);;All files (*)")
@@ -594,30 +701,92 @@ class MainWindow(QMainWindow):
                 sim.load_file(path)
 
     def _project_gcode(self):  # type: ignore[no-untyped-def]
-        """(G-code, name) of the current project, or None without geometry."""
+        """(G-code, name, foam block) of the current project, or None without geometry."""
         if not self.controller.has_geometry:
             return None
-        from ..services import gcode_service
-
-        name = Path(self.controller.project.source_dxf_name or "project").stem + ".gcode"
-        return gcode_service.export_standard(self.controller.project), name
+        self._flush_check()
+        return self.controller.gcode_text, self._gcode_name(), self.controller.project.block
 
     def _on_cut_lab(self) -> None:
-        dlg = getattr(self, "_cut_lab", None)
-        if dlg is None:
-            try:
-                from .widgets.cutlab.cut_lab import CutLabDialog
+        """Step 4: the Cut Lab, in the main view (no separate window)."""
+        if self.sidebar.unlocked()[3]:
+            self.sidebar.show_step(4)  # -> _on_step_shown
+        else:  # no project yet: the lab still calibrates the wire
+            self._show_cut_lab()
 
-                dlg = self._cut_lab = CutLabDialog(self, self.theme)
+    def _cut_lab_page(self):  # type: ignore[no-untyped-def]
+        lab = getattr(self, "_cut_lab", None)
+        if lab is None:
+            try:
+                from .widgets.cutlab.cut_lab import CutLab
+
+                lab = self._cut_lab = CutLab(self, self.theme)
             except Exception as exc:  # pyqtgraph/OpenGL unavailable on this machine
                 self.toasts.show_toast("Cut Lab unavailable", str(exc), "warning")
-                return
-            dlg.lab.set_project_provider(self._project_gcode)
-            got = self._project_gcode()
-            if got:
-                dlg.lab.load_text(*got)
-        dlg.show()
-        dlg.raise_()
+                return None
+            lab.set_project_provider(self._project_gcode)
+            lab.block_edited.connect(self.controller.set_block)
+            lab.work_saved.connect(self._on_cut_settings)
+            lab.close_requested.connect(lambda: QTimer.singleShot(900, lambda: self.sidebar.show_step(5)))
+            lab.set_rig(self.controller.project.rig)
+            self._canvas_stack.addWidget(lab)
+        return lab
+
+    def _on_cut_settings(self, settings) -> None:  # type: ignore[no-untyped-def]
+        self.controller.apply_cut_settings(settings)
+        self.sidebar.show_cut_settings(settings)
+
+    def _load_cut_settings(self) -> None:
+        """The last calibration saved in the Cut Lab is used from the start (work speed)."""
+        try:
+            from ..core.cut_profile import load_saved_cut_settings
+
+            settings = load_saved_cut_settings()
+        except Exception:
+            settings = None
+        if settings is not None:
+            self._on_cut_settings(settings)
+
+    def _show_cut_lab(self) -> None:
+        first = getattr(self, "_cut_lab", None) is None
+        lab = self._cut_lab_page()
+        if lab is None:
+            return
+        got = self._project_gcode()
+        if got and (first or (lab.linked and lab.toolpath.moves != self.controller.toolpath.moves)):
+            lab.load_text(*got)
+        if self._canvas_stack.currentWidget() is not lab:
+            self._mode_before_lab = self.view_mode
+            self._canvas_stack.setCurrentWidget(lab)
+            if self.view_mode != "single":
+                self._set_view_mode("single")  # the lab needs the whole centre
+        if self.controller.has_geometry:
+            self.sidebar.mark_visited(4)
+
+    def _show_workspace(self) -> None:
+        """Back from the Cut Lab to the 3D view (or the 2D canvas)."""
+        lab = getattr(self, "_cut_lab", None)
+        if lab is None or self._canvas_stack.currentWidget() is not lab:
+            return
+        lab.save_default()  # its calibration is kept and used everywhere
+        self._canvas_stack.setCurrentWidget(self._viewer3d if self._view3d and self._viewer3d else self.canvas)
+        prev = getattr(self, "_mode_before_lab", None)
+        if prev and prev != self.view_mode:
+            self._set_view_mode(prev)
+        if self._viewer_visible():
+            self._refresh_viewer3d(full=True)
+
+    def _on_step_shown(self, step: int) -> None:
+        if step == 4:
+            self._show_cut_lab()
+        else:
+            self._show_workspace()
+
+    def closeEvent(self, ev) -> None:  # type: ignore[no-untyped-def]
+        lab = getattr(self, "_cut_lab", None)
+        if lab is not None:
+            lab.save_default()
+        super().closeEvent(ev)
 
     def _toggle_compat3d(self, on: bool) -> None:
         from .widgets.view3d.scene import set_backend_preference
@@ -632,7 +801,9 @@ class MainWindow(QMainWindow):
                 try:
                     from .widgets.canvas.viewer3d import Viewer3D
 
-                    self._viewer3d = Viewer3D(self)
+                    p = self.controller.project
+                    self._viewer3d = Viewer3D(self, rig=p.rig, block=p.block)
+                    self._viewer3d.set_setup(*self._viewer_setup())
                     self._viewer3d.set_palette(self.theme)
                     self._canvas_stack.addWidget(self._viewer3d)
                 except Exception as exc:  # OpenGL/pyqtgraph unavailable on this machine
@@ -644,6 +815,8 @@ class MainWindow(QMainWindow):
                     return
             self._canvas_stack.setCurrentWidget(self._viewer3d)
             self._refresh_viewer3d(full=True)
+            if self.controller.has_geometry:
+                self.sidebar.mark_visited(3)
             if self.view_mode == "grid":
                 self._set_view_mode("split")  # need the right pane visible to see 3D
         else:
@@ -655,9 +828,17 @@ class MainWindow(QMainWindow):
         if self._viewer3d is None:
             return
         c = self.controller
+        traj = c.active_trajectory()
         if full:
-            self._viewer3d.set_model(c.project.machine_segments(), c.project.area_y_mm, c.project.area_z_mm)
-        self._viewer3d.set_cut(c.active_trajectory(), self.timeline.progress_fraction())
+            self._viewer3d.set_setup(*self._viewer_setup())
+            self._viewer3d.set_model(c.project.machine_segments())
+        self._viewer3d.set_cut(traj, self.timeline.progress_fraction())
+        # a new path (profile loaded, moved, turned, other entry): show the wire running it once
+        key = (len(traj), traj[0], traj[-1]) if traj else None
+        if full and key != getattr(self, "_previewed", None):
+            self._previewed = key
+            if key is not None and not self._sim_timer.isActive():
+                self._viewer3d.preview()
 
     def _on_changed_viewer3d(self) -> None:
         if self._viewer_visible():
