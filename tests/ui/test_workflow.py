@@ -209,3 +209,16 @@ def test_advanced_tools_dont_widen_the_panel(window):
     swatches = [b for b in sb.part_section.findChildren(QPushButton) if b.maximumWidth() == 20]
     assert len(swatches) >= 6
     assert all(b.minimumWidth() <= 20 for b in swatches)  # colour dots once made the whole panel 200 px wider
+
+
+def test_toolbar_shows_only_tools_that_work(app, tmp_path):
+    from appSlicerSegelin.v2.ui.main_window import MainWindow
+
+    w = MainWindow()
+    assert not any(a.isEnabled() for a in w._geo_actions)  # no profile: nothing to rotate or mirror
+    w.controller.import_dxf(_plate(tmp_path, 20))
+    assert all(a.isEnabled() for a in w._geo_actions)
+    w._view3d_action.setChecked(True)
+    assert not w._measure_action.isVisible() and not w._dims_action.isVisible()  # 2D-only tools
+    w._view3d_action.setChecked(False)
+    assert w._measure_action.isVisible()

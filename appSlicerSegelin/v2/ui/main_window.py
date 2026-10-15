@@ -153,6 +153,8 @@ class MainWindow(QMainWindow):
         self.controller.parts_changed.connect(self._update_part_panel)
         self.controller.changed.connect(self.parts_grid.refresh)
         self.controller.changed.connect(self._on_changed_viewer3d)
+        self.controller.changed.connect(self._sync_tools)
+        self._sync_tools()
         self.controller.notify.connect(self._on_notify)
         # Machine check: re-run (debounced) when the geometry changes, then show it everywhere.
         self._check_timer = QTimer(self)
@@ -244,7 +246,7 @@ class MainWindow(QMainWindow):
 
         # Recent files dropdown.
         recent_btn = QToolButton(self)
-        set_icon(recent_btn, "folder-open", col)
+        set_icon(recent_btn, "file", col)
         recent_btn.setText("Recent")
         recent_btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
         recent_btn.setToolTip("Open a recent file")
@@ -255,15 +257,18 @@ class MainWindow(QMainWindow):
         bar.addWidget(recent_btn)
 
         bar.addSeparator()
-        act("save", "Export G-code", self._on_export_gcode, "Ctrl+E")
+        act("download", "Export G-code", self._on_export_gcode, "Ctrl+E")
         bar.addSeparator()
         act("undo", "Undo", self._on_undo, "Ctrl+Z")
         act("redo", "Redo", self._on_redo, "Ctrl+Shift+Z")
         bar.addSeparator()
-        act("rotate-ccw", "Rotate −90°", lambda: self.controller.rotate(-90))
-        act("rotate-cw", "Rotate +90°", lambda: self.controller.rotate(90))
-        act("flip-horizontal", "Mirror V", self.controller.mirror_vertical)
-        act("flip-vertical", "Mirror H", self.controller.mirror_horizontal)
+        # the profile's tools: only with a profile loaded (they would do nothing before)
+        self._geo_actions = [
+            act("rotate-ccw", "Rotate −90°", lambda: self.controller.rotate(-90), tip="Rotate the profile −90°"),
+            act("rotate-cw", "Rotate +90°", lambda: self.controller.rotate(90), tip="Rotate the profile +90°"),
+            act("flip-horizontal", "Mirror V", self.controller.mirror_vertical, tip="Mirror the profile left–right"),
+            act("flip-vertical", "Mirror H", self.controller.mirror_horizontal, tip="Mirror the profile up–down"),
+        ]
         spacer = QWidget(self)
         spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         bar.addWidget(spacer)
@@ -283,15 +288,17 @@ class MainWindow(QMainWindow):
         self._dims_action.toggled.connect(self._toggle_dims)
         bar.addAction(self._dims_action)
 
-        self._view3d_action = QAction("3D", self)
+        self._view3d_action = QAction("3D view", self)
         set_icon(self._view3d_action, "cube", col)
         self._view3d_action.setCheckable(True)
-        self._view3d_action.setToolTip("3D slicer view — printer, foam block & hot wire")
+        self._view3d_action.setToolTip("On: the printer, foam block and hot wire in 3D. Off: the flat 2D drawing "
+                                       "of the profile (with measuring tools).")
         self._view3d_action.toggled.connect(self._toggle_3d)
         bar.addAction(self._view3d_action)
+        btn = bar.widgetForAction(self._view3d_action)
+        if isinstance(btn, QToolButton):
+            btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)  # say what it switches
 
-        act("layers", "Cycle view: single / split / grid", self._cycle_view)
-        act("command", "Command palette (Ctrl+K)", self.palette.open)
         act("help", "Keyboard shortcuts (?)", self._open_shortcuts_overlay)
         self._theme_action = act("moon" if self.theme == "light" else "sun", "Toggle theme", self._toggle_theme, "Ctrl+T")
 
@@ -355,6 +362,7 @@ class MainWindow(QMainWindow):
         self._compat3d_action.setChecked(backend_preference() == "opengl")
         self._compat3d_action.toggled.connect(self._toggle_compat3d)
         m.addAction(self._compat3d_action)
+        add(m, "Command palette…", self.palette.open)
         add(m, "Keyboard shortcuts…", self._open_shortcuts_overlay)
 
         m = mb.addMenu("&Simulate")
@@ -827,7 +835,20 @@ class MainWindow(QMainWindow):
         else:
             self._canvas_stack.setCurrentWidget(self.canvas)
             QTimer.singleShot(0, self.view.fit_to_content)
+        self._sync_tools()
         self.statusBar().showMessage("View: 3D" if on else "View: 2D", 1500)
+
+    def _sync_tools(self) -> None:
+        """Show only the toolbar tools that do something right now."""
+        two_d = not self._view3d
+        if not two_d:
+            self._measure_action.setChecked(False)
+            self._dims_action.setChecked(False)
+        self._measure_action.setVisible(two_d)  # they measure on the 2D drawing
+        self._dims_action.setVisible(two_d)
+        geo = self.controller.has_geometry
+        for a in self._geo_actions:
+            a.setEnabled(geo)
 
     def _refresh_viewer3d(self, full: bool = False) -> None:
         if self._viewer3d is None:
