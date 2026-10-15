@@ -202,6 +202,7 @@ class Sidebar(QScrollArea):
         self.c.changed.connect(self._refresh_steps)
         self.c.setup_changed.connect(self._refresh_check)
         self.c.info_changed.connect(lambda: self._active == 5 and self._refresh_export())
+        self.c.setup_changed.connect(lambda: self._active == 5 and self._refresh_export())
         self._refresh_layer_state()
         self._refresh_manual_list()
         self.update_part_panel()
@@ -487,9 +488,9 @@ class Sidebar(QScrollArea):
         self.cmb_entry = QComboBox()
         self.cmb_entry.addItem("From the side", "side")
         self.cmb_entry.addItem("From the top", "top")
-        self.cmb_entry.setToolTip("The wire starts in front of the block, at its bottom. Side: it rises in the air and "
-                                  "cuts straight in to the profile's front. Top: it goes over the block and cuts "
-                                  "straight down to the profile's highest point.")
+        self.cmb_entry.setToolTip("The wire starts at the block's front-top edge and first steps 5 mm forward. "
+                                  "Side: from there it cuts straight in to the profile's front. Top: it goes over "
+                                  "the block and cuts straight down to the profile's highest point.")
         self.cmb_entry.currentIndexChanged.connect(self._on_entry)
         s.add_layout(_row(QLabel("Wire enters"), self.cmb_entry))
         b_rot = _icon_btn("rotate-cw", "  Rotate 90°")
@@ -982,16 +983,21 @@ class Sidebar(QScrollArea):
         b_g.setToolTip("Export machine-ready G-code for the current profile (Ctrl+E)")
         b_g.clicked.connect(self.export_gcode_requested.emit)
         s.add(b_g)
-        check = QLabel(
-            "<b>Before you cut</b><br>"
-            "1. Set the supply as the Cut Lab says and let the wire heat up.<br>"
-            "2. Bring the wire to the start point: in front of the block, level with its bottom face "
-            "(the top of the spacer board). "
-            "The G-code takes that spot as zero.<br>"
-            "3. Don't home the printer (Auto Home, G28) with the segelín on: the arms would hit the bed.")
-        check.setWordWrap(True)
-        check.setObjectName("ExportChecklist")
-        s.add(check)
+        self.cmb_origin = QComboBox()
+        self.cmb_origin.addItem("Top edge", "top")
+        self.cmb_origin.addItem("Bottom (old)", "bottom")
+        self.cmb_origin.setToolTip(
+            "Where you put the wire before starting; the G-code takes that spot as its start.\n"
+            "Top edge (recommended): the wire touches the block's front-top edge. You touch the foam itself "
+            "with the cold wire, so the spacer and the block's "
+            "exact height don't matter, and the wire never starts down by the spacer board.\n"
+            "Bottom (old): in front of the block, level with the block's bottom face.")
+        self.cmb_origin.currentIndexChanged.connect(self._on_origin)
+        s.add_layout(_row(QLabel("Wire starts"), self.cmb_origin))
+        self.export_check = QLabel("")
+        self.export_check.setWordWrap(True)
+        self.export_check.setObjectName("ExportChecklist")
+        s.add(self.export_check)
         fold, more = _fold("Other exports")
         b_dxf = QPushButton("Export modified DXF")
         b_dxf.setToolTip("Save the transformed geometry back out as a DXF")
@@ -1017,3 +1023,40 @@ class Sidebar(QScrollArea):
                 "the wire runs on the drawn line (no kerf compensation)")
         entry = "from the side" if p.entry == "side" else "from the top"
         self.export_summary.setText(f"Feed {p.speed_mm_s:g} mm/s · {kerf} · the wire enters {entry}.")
+        self._syncing = True
+        self.cmb_origin.setCurrentIndex(self.cmb_origin.findData(p.origin))
+        self._syncing = False
+        self.cmb_origin.setEnabled(not p.block_auto)
+        self.export_check.setText(self._setup_steps())
+
+    def _setup_steps(self) -> str:
+        """The checklist for setting the block and the wire before every cut."""
+        p, b = self.c.project, self.c.project.block
+        ws = self.c.cut_settings
+        if ws is not None and ws.voltage_v > 0:
+            supply = (f"{ws.voltage_v:.1f} V (CV)" if ws.supply_mode == "voltage" else f"{ws.current_a:.2f} A (CC)")
+            heat = f"Turn the supply on at {supply}, as the Cut Lab saved"
+        else:
+            heat = "Turn the supply on as the Cut Lab says"
+        x = ("centred on the wire" if abs(b.x_offset) < 0.5 else
+             f"its middle {abs(b.x_offset):.0f} mm off the wire's centre, as in the 3D view")
+        block = (f"<b>1. The block.</b> {b.length_y:.0f} × {b.height_z:.0f} × {b.width_x:.0f} mm (long × tall × wide) "
+                 f"on a {b.spacer:.0f} mm spacer board. Different foam? Change it in step 1 first.<br>")
+        jog = ("<b>2. Wire cold</b> (supply off). Move it only with the printer's menu (Prepare › Move axis). "
+               "<b>Never Auto Home (G28)</b>: the arms would hit the bed.<br>")
+        if p.wire_origin == "top":
+            place = ("<b>3. Wire to the corner.</b> Raise the wire above the block's height, then slide the block "
+                     "in until its front face touches the wire. Lower Z until the wire just rests on the front-top "
+                     f"edge. Block {x}.<br>"
+                     f"<b>4. Heat and start.</b> {heat} and start the G-code straight away: its first move takes the "
+                     "wire 5 mm away from the foam. It ends there too, clear of the block.")
+        else:
+            why = (" (the block follows the cut, so the wire can't use it as the reference)" if p.block_auto else "")
+            place = ("<b>3. Wire to the start.</b> In front of the block, level with its bottom face (the top of the "
+                     f"spacer board){why}. Block {x}.<br>"
+                     f"<b>4. Heat and start.</b> {heat}, then start the G-code. It ends back at that spot.")
+        return "<b>Before every cut: set the block with the wire</b><br>" + block + jog + place
+
+    def _on_origin(self) -> None:
+        if not self._syncing:
+            self.c.set_origin(self.cmb_origin.currentData())

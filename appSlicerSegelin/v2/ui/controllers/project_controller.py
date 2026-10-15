@@ -428,6 +428,17 @@ class ProjectController(QObject):
             self.changed.emit()  # the wire's path moves: redraw and re-check it
         self.info_changed.emit()
 
+    def set_origin(self, origin: str) -> None:
+        """Where the operator puts the wire before starting: "top" (touching the block's
+        front-top edge) or "bottom" (in front of it, level with its bottom face)."""
+        if origin not in ("top", "bottom") or origin == self.project.origin:
+            return
+        self.project.origin = origin
+        self.update_cut_check()
+        if self.has_geometry:
+            self.changed.emit()  # the wire's way in and out moves
+        self.info_changed.emit()
+
     def set_area(self, area_y: float, area_z: float) -> None:
         self.project.area_y_mm = max(0.0, area_y)
         self.project.area_z_mm = max(0.0, area_z)

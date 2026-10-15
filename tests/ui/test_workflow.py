@@ -222,3 +222,24 @@ def test_toolbar_shows_only_tools_that_work(app, tmp_path):
     assert not w._measure_action.isVisible() and not w._dims_action.isVisible()  # 2D-only tools
     w._view3d_action.setChecked(False)
     assert w._measure_action.isVisible()
+
+
+def test_wire_starts_on_the_block_and_the_checklist_says_how(app, tmp_path):
+    from appSlicerSegelin.v2.ui.main_window import MainWindow
+
+    w = MainWindow()
+    sb, c = w.sidebar, w.controller
+    sb.b_create.click()
+    c.import_dxf(_plate(tmp_path, 20))
+    w._flush_check()
+    sb.show_step(5)
+    b = c.project.block
+    assert sb.cmb_origin.currentData() == "top" and sb.cmb_origin.isEnabled()
+    text = sb.export_check.text()
+    assert "front-top edge" in text and f"{b.length_y:.0f} × {b.height_z:.0f}" in text and "G28" in text
+    assert c.toolpath.start == (pytest.approx(b.y0), pytest.approx(b.z1))
+    sb.cmb_origin.setCurrentIndex(sb.cmb_origin.findData("bottom"))
+    assert c.project.origin == "bottom" and c.toolpath.start == (0, 0)
+    assert "bottom face" in sb.export_check.text()
+    c.set_block(replace(b, height_z=b.height_z + 10))  # the checklist follows the block
+    assert f"× {b.height_z + 10:.0f} ×" in sb.export_check.text()
