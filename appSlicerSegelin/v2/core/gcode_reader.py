@@ -107,8 +107,8 @@ def parse_gcode(text: str, *, default_feed_mm_min: float = DEFAULT_FEED_MM_MIN) 
     """Parse ``text`` into a timed :class:`Toolpath`.
 
     Unknown commands are skipped. Moves of zero length are dropped. The wire
-    starts at (0, 0), which is what ``G92 Y0 Z0`` in the slicer's header
-    declares: the operator parks the wire at the block's origin corner.
+    starts at (0, 0) unless a ``G92`` before the first move says otherwise (the
+    slicer's header labels where the operator puts the wire).
     """
     lines = text.splitlines()
     tp = Toolpath(lines=lines)

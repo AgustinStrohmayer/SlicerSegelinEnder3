@@ -42,6 +42,7 @@ def _project_payload(project: Project) -> dict:
         "block_auto": project.block_auto,
         "block_created": project.block_created,
         "entry": project.entry,
+        "origin": project.origin,
     }
 
 
@@ -104,6 +105,8 @@ def _project_from_data(data: dict) -> Project:
         project.source_dxf_name = str(data["source_dxf_name"])
     if data.get("entry") in ("side", "top"):
         project.entry = str(data["entry"])
+    if data.get("origin") in ("top", "bottom"):
+        project.origin = str(data["origin"])
     if isinstance(data.get("rig"), dict):
         name = data["rig"].get("name")
         project.rig = _dataclass_from(PRESETS.get(name, project.rig), data["rig"])  # type: ignore[arg-type]

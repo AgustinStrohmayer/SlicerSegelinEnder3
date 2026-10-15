@@ -29,7 +29,8 @@ def _machine_with_feed(project: Project):
 
 def export_standard(project: Project) -> str:
     machine = _machine_with_feed(project)
-    plan = slicer_service.cut_plan(slicer_service.standard_trajectory(project), machine)
+    traj = slicer_service.standard_trajectory(project)
+    plan = slicer_service.cut_plan(traj, machine, origin=slicer_service.touch_origin(project, traj))
     return emit_gcode(plan)
 
 

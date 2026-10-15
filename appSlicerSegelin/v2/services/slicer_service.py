@@ -23,13 +23,14 @@ def standard_trajectory(project: Project) -> list[Segment]:
     """
     machine = project.machine_segments()
     key = (tuple(machine), project.block_created, project.block if project.block_created else None,
-           project.entry, project.reverse_cut, project.kerf_comp_mm)
+           project.entry, project.wire_origin, project.reverse_cut, project.kerf_comp_mm)
     global _last_standard
     if _last_standard is not None and _last_standard[0] == key:
         return list(_last_standard[1])  # a block edit asks for it several times; it only changes with the key
     machine = compensate_kerf(machine, project.kerf_comp_mm)
     if project.block_created:
-        out = build_block_trajectory(machine, project.block, entry=project.entry, reverse=project.reverse_cut)
+        out = build_block_trajectory(machine, project.block, entry=project.entry, origin=project.wire_origin,
+                                     reverse=project.reverse_cut)
     else:
         out = build_full_trajectory(machine, add_unions=False, reverse=project.reverse_cut)
     _last_standard = (key, tuple(out))
@@ -55,9 +56,18 @@ def build_layers(project: Project) -> list[Layer]:
     return []
 
 
-def cut_plan(segments: list[Segment], machine: MachineProfile, notes: tuple[str, ...] = ()) -> CutPlan:
-    return CutPlan(segments=tuple(segments), machine=machine, notes=notes)
+def cut_plan(segments: list[Segment], machine: MachineProfile, notes: tuple[str, ...] = (),
+             origin: tuple[float, float] | None = None) -> CutPlan:
+    return CutPlan(segments=tuple(segments), machine=machine, notes=notes, origin=origin)
+
+
+def touch_origin(project: Project, trajectory: list[Segment]) -> tuple[float, float] | None:
+    """Where the wire starts when it touches the block (``origin == "top"``), else None (0, 0)."""
+    if project.wire_origin == "top" and trajectory:
+        return (trajectory[0].a.y, trajectory[0].a.z)
+    return None
 
 
 def standard_cut_plan(project: Project) -> CutPlan:
-    return cut_plan(standard_trajectory(project), project.machine)
+    traj = standard_trajectory(project)
+    return cut_plan(traj, project.machine, origin=touch_origin(project, traj))

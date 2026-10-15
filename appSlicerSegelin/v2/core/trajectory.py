@@ -181,20 +181,26 @@ def _closed(cut: list[Segment]) -> bool:
 
 
 def build_block_trajectory(segments: list[Segment], block, *, entry: str = "side",  # type: ignore[no-untyped-def]
-                           reverse: bool = False) -> list[Segment]:
-    """The machine path for a profile inside a foam block, with the wire parked at the origin (0, 0).
+                           origin: str = "bottom", reverse: bool = False) -> list[Segment]:
+    """The machine path for a profile inside a foam block, starting where the operator put the wire.
 
-    The origin is in front of the block, level with its bottom face, so the wire
-    never starts under or inside the foam. ``entry`` picks how it gets in:
+    ``origin`` is that spot:
 
-    * ``"side"``: up in the air in front of the block, then straight in
-      (horizontally) to the profile's front-most point;
+    * ``"top"``: touching the block's front-top edge, (y0, z1). The wire first
+      steps ``_TOP_CLEARANCE_MM`` forward, works from that line in front of the
+      block and ends back on it, level with the top: clear of the foam and of
+      the spacer under it.
+    * ``"bottom"`` (legacy): at (0, 0), in front of the block, level with its
+      bottom face. It works from the line Y = 0 and ends back at (0, 0).
+
+    ``entry`` picks how it gets in from that front line:
+
+    * ``"side"``: straight in (horizontally) to the profile's front-most point;
     * ``"top"``: up above the block, over it, then straight down to the
       profile's highest point.
 
-    It leaves the same way it came in and ends back at the origin. A closed
-    profile is started at that front-most / highest point, so the entry slit is
-    as short as possible.
+    It leaves the same way it came in. A closed profile is started at that
+    front-most / highest point, so the entry slit is as short as possible.
     """
     cut = build_cut_path(segments, reverse=reverse)
     if not cut:
@@ -204,26 +210,32 @@ def build_block_trajectory(segments: list[Segment], block, *, entry: str = "side
         i = min(range(len(cut)), key=lambda k: key(cut[k]))
         cut = cut[i:] + cut[:i]
     start, end = cut[0].a, cut[-1].b
-    o = Point(0.0, 0.0)
     path: list[Segment] = []
 
     def go(a: Point, b: Point, kind: SegmentKind) -> None:
         if a.distance_to(b) > 1e-9:
             path.append(Segment(a, b, kind))
 
+    if origin == "top":
+        yf = min(block.y0, start.y, end.y) - _TOP_CLEARANCE_MM
+        home = Point(yf, block.z1)
+        go(Point(block.y0, block.z1), home, SegmentKind.ENTRY)
+    else:
+        yf = 0.0
+        home = Point(0.0, 0.0)
     if entry == "top":
         top = max(block.z1, max(max(s.a.z, s.b.z) for s in cut)) + _TOP_CLEARANCE_MM
-        go(o, Point(0.0, top), SegmentKind.ENTRY)
-        go(Point(0.0, top), Point(start.y, top), SegmentKind.ENTRY)
+        go(home, Point(yf, top), SegmentKind.ENTRY)
+        go(Point(yf, top), Point(start.y, top), SegmentKind.ENTRY)
         go(Point(start.y, top), start, SegmentKind.ENTRY)
         path += cut
         go(end, Point(end.y, top), SegmentKind.EXIT)
-        go(Point(end.y, top), Point(0.0, top), SegmentKind.RETURN_H)
-        go(Point(0.0, top), o, SegmentKind.RETURN_V)
+        go(Point(end.y, top), Point(yf, top), SegmentKind.RETURN_H)
+        go(Point(yf, top), home, SegmentKind.RETURN_V)
     else:
-        go(o, Point(0.0, start.z), SegmentKind.ENTRY)
-        go(Point(0.0, start.z), start, SegmentKind.ENTRY)
+        go(home, Point(yf, start.z), SegmentKind.ENTRY)
+        go(Point(yf, start.z), start, SegmentKind.ENTRY)
         path += cut
-        go(end, Point(0.0, end.z), SegmentKind.EXIT)
-        go(Point(0.0, end.z), o, SegmentKind.RETURN_V)
+        go(end, Point(yf, end.z), SegmentKind.EXIT)
+        go(Point(yf, end.z), home, SegmentKind.RETURN_V)
     return path

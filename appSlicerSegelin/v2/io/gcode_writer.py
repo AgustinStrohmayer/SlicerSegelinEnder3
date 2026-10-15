@@ -47,10 +47,14 @@ class GcodeEmitter:
         lines.append("M140 S0 ; Turn off bed temperature")
         lines.append("M104 S0 ; Turn off hotend temperature")
         lines.append("M107 ; Turn off layer fan")
-        lines.append("G92 Y0 Z0 ; Set current position as origin")
+        if plan.origin is None:
+            lines.append("G92 Y0 Z0 ; Set current position as origin")
+            y_cur, z_cur = 0.0, 0.0
+        else:
+            y_cur, z_cur = (m.round_coord(v) for v in plan.origin)
+            lines.append(f"G92 Y{y_cur} Z{z_cur} ; The wire touches the block's front-top edge here")
         lines.append(";--- CUT START ---")
 
-        y_cur, z_cur = 0.0, 0.0
         last_feed: float | None = None
 
         for seg in plan.segments:
@@ -73,7 +77,8 @@ class GcodeEmitter:
             y_cur, z_cur = y2, z2
 
         lines.append(";--- CUT END ---")
-        lines.append(_format_move(0.0, 0.0, m.feed_travel_mm_min, last_feed, suffix=" ; Smooth return to origin"))
+        if plan.origin is None:
+            lines.append(_format_move(0.0, 0.0, m.feed_travel_mm_min, last_feed, suffix=" ; Smooth return to origin"))
         lines.append("M84 ; Turn off motors")
         return m.line_ending.join(lines) + m.line_ending
 

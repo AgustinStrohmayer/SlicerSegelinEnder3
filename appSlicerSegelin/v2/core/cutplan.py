@@ -18,6 +18,10 @@ class CutPlan:
     segments: tuple[Segment, ...]
     machine: MachineProfile
     notes: tuple[str, ...] = field(default_factory=tuple)
+    # Where the wire is when the file starts, in G-code coordinates. None: the
+    # legacy origin (0, 0), returned to at the end. Otherwise the wire touches the
+    # block there and the path itself ends clear of the foam.
+    origin: tuple[float, float] | None = None
 
     @property
     def total_cut_length(self) -> float:

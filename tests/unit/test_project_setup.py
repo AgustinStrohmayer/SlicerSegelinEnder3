@@ -90,6 +90,7 @@ def test_wire_never_starts_under_or_inside_the_block(entry):
     from appSlicerSegelin.v2.services import gcode_service
 
     p = _plate_project(entry)
+    p.origin = "bottom"
     b = p.block
     tp = parse_gcode(gcode_service.export_standard(p))
     first, second, last = tp.moves[0], tp.moves[1], [m for m in tp.moves if (m.y0, m.z0) != (m.y1, m.z1)][-1]
@@ -103,6 +104,28 @@ def test_wire_never_starts_under_or_inside_the_block(entry):
     assert check_cut(p.rig, b, tp) == []
     fit = refit_block(b, tp)
     assert 0 < fit.y0 and fit.z1 < (first.z1 if entry == "top" else 1e9)  # the fit keeps the wire's way in clear
+
+
+@pytest.mark.parametrize("entry", ["side", "top"])
+def test_wire_starts_touching_the_block_top_edge(entry):
+    from appSlicerSegelin.v2.services import gcode_service
+
+    p = _plate_project(entry)
+    assert p.origin == "top"
+    b = p.block
+    text = gcode_service.export_standard(p)
+    assert text.count("G92 ") == 1 and "front-top edge" in text
+    assert "Smooth return to origin" not in text
+    tp = parse_gcode(text)
+    assert tp.start == (pytest.approx(b.y0), pytest.approx(b.z1))  # the wire touches the front-top edge
+    first = tp.moves[0]
+    assert first.z1 == pytest.approx(b.z1) and first.y1 == pytest.approx(b.y0 - 5)  # steps 5 mm forward first
+    last = tp.moves[-1]
+    assert (last.y1, last.z1) == (pytest.approx(b.y0 - 5), pytest.approx(b.z1))  # ends clear, level with the top
+    assert min(m.z1 for m in tp.moves if m.y1 < b.y0) >= min(m.z1 for m in tp.moves) - 1e-9
+    assert check_cut(p.rig, b, tp) == []
+    p.block_auto = True  # a block that follows the G-code can't be the reference
+    assert parse_gcode(gcode_service.export_standard(p)).start == (0, 0)
 
 
 def test_block_behind_the_wire_is_flagged():

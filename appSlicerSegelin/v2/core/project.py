@@ -76,6 +76,11 @@ class Project:
     # "side" (in front, then straight in) or "top" (over it, then down).
     # Only used once the block exists; see ``trajectory.build_block_trajectory``.
     entry: str = "side"
+    # Where the operator puts the wire before starting (what ``G92`` labels):
+    # "top" touches the block's front-top edge, so the wire starts above the
+    # spacer and the reference is the foam itself; "bottom" is the legacy spot
+    # in front of the block, level with its bottom face (G-code 0, 0).
+    origin: str = "top"
 
     # Export.
     batch_basename: str = "cut"
@@ -89,6 +94,12 @@ class Project:
     schema_version: int = SCHEMA_VERSION
 
     # ── derived helpers ───────────────────────────────────────────────
+    @property
+    def wire_origin(self) -> str:
+        """The origin the cut really uses: touching the block needs a real block,
+        not one that follows the G-code (that would chase its own start point)."""
+        return self.origin if self.block_created and not self.block_auto else "bottom"
+
     def machine_segments(self) -> list[Segment]:
         """Base geometry translated onto the bed."""
         from .transforms import translate
