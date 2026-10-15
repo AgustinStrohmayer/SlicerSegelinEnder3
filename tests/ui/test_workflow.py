@@ -162,3 +162,18 @@ def test_beginner_sees_only_the_essentials(window):
     sb.show_step(2)
     sb.cmb_entry.setCurrentIndex(sb.cmb_entry.findData("top"))
     assert window.controller.project.entry == "top"
+
+
+def test_cut_lab_kerf_keeps_the_part_at_size(window):
+    from appSlicerSegelin.v2.core.cut_profile import WorkSettings
+
+    w = window
+    c, sb = w.controller, w.sidebar
+    w._on_cut_settings(WorkSettings(work_feed_mm_s=6.0, kerf_mm=0.8))
+    assert c.project.speed_mm_s == 6.0 and c.project.kerf_comp_mm == pytest.approx(0.4)
+    assert sb.chk_kerf.isEnabled() and sb.chk_kerf.isChecked() and "0.40 mm" in sb.chk_kerf.text()
+    w._flush_check()
+    compensated = c.gcode_text
+    sb.chk_kerf.setChecked(False)  # cut on the line
+    w._flush_check()
+    assert c.project.kerf_comp_mm == 0.0 and c.gcode_text != compensated  # the G-code follows it

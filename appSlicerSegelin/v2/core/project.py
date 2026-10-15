@@ -49,6 +49,9 @@ class Project:
     # Cut parameters.
     speed_mm_s: float = 10.0
     reverse_cut: bool = False
+    # Half the wire's kerf, from the Cut Lab: closed contours are moved this far
+    # away from the part so it comes out at its drawn size (0 = cut on the line).
+    kerf_comp_mm: float = 0.0
 
     # Plate / usable area (mm). Defaults match the legacy app.
     area_y_mm: float = 220.0

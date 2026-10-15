@@ -54,6 +54,9 @@ class ProjectController(QObject):
         self.toolpath: Toolpath = parse_gcode("")
         self.cut_issues: list[str] = []
         self.block_issues: list[str] = []  # the block on the machine, before any cut
+        # The Cut Lab's saved work settings (core.cut_profile.WorkSettings) and whether its kerf is applied.
+        self.cut_settings = None
+        self.kerf_on = True
 
     # ── helpers ───────────────────────────────────────────────────────
     @property
@@ -408,6 +411,22 @@ class ProjectController(QObject):
         self.cut_settings = settings
         if settings is not None and settings.work_feed_mm_s > 0:
             self.set_speed(settings.work_feed_mm_s)
+        self.set_kerf_on(self.kerf_on)
+
+    def set_kerf_on(self, on: bool) -> None:
+        """Move the wire half the Cut Lab's kerf away from the part, so it comes out at its drawn size."""
+        self.kerf_on = on
+        s = self.cut_settings
+        self.set_kerf_comp(s.kerf_offset_mm if on and s is not None else 0.0)
+
+    def set_kerf_comp(self, offset_mm: float) -> None:
+        offset_mm = round(max(0.0, offset_mm), 4)
+        if offset_mm == self.project.kerf_comp_mm:
+            return
+        self.project.kerf_comp_mm = offset_mm
+        if self.has_geometry:
+            self.changed.emit()  # the wire's path moves: redraw and re-check it
+        self.info_changed.emit()
 
     def set_area(self, area_y: float, area_z: float) -> None:
         self.project.area_y_mm = max(0.0, area_y)

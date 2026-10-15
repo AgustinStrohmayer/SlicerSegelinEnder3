@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from ..core.cutplan import CutPlan
 from ..core.geometry import Segment
+from ..core.kerf import compensate_kerf
 from ..core.machine import MachineProfile
 from ..core.plates import Layer, partition_by_manual_cuts, split_into_plates
 from ..core.project import Project
@@ -22,10 +23,11 @@ def standard_trajectory(project: Project) -> list[Segment]:
     """
     machine = project.machine_segments()
     key = (tuple(machine), project.block_created, project.block if project.block_created else None,
-           project.entry, project.reverse_cut)
+           project.entry, project.reverse_cut, project.kerf_comp_mm)
     global _last_standard
     if _last_standard is not None and _last_standard[0] == key:
         return list(_last_standard[1])  # a block edit asks for it several times; it only changes with the key
+    machine = compensate_kerf(machine, project.kerf_comp_mm)
     if project.block_created:
         out = build_block_trajectory(machine, project.block, entry=project.entry, reverse=project.reverse_cut)
     else:

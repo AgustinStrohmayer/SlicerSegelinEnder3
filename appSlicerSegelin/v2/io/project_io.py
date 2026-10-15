@@ -29,6 +29,7 @@ def _project_payload(project: Project) -> dict:
         "offset_z": project.offset_z,
         "speed_mm_s": project.speed_mm_s,
         "reverse_cut": project.reverse_cut,
+        "kerf_comp_mm": project.kerf_comp_mm,
         "area_y_mm": project.area_y_mm,
         "area_z_mm": project.area_z_mm,
         "split_into_plates": project.split_into_plates,
@@ -92,6 +93,7 @@ def _project_from_data(data: dict) -> Project:
     project.offset_z = float(data.get("offset_z", 0.0))
     project.speed_mm_s = float(data.get("speed_mm_s", 10.0))
     project.reverse_cut = bool(data.get("reverse_cut", False))
+    project.kerf_comp_mm = max(0.0, float(data.get("kerf_comp_mm", 0.0)))
     project.area_y_mm = float(data.get("area_y_mm", 220.0))
     project.area_z_mm = float(data.get("area_z_mm", 100.0))
     project.split_into_plates = bool(data.get("split_into_plates", False))

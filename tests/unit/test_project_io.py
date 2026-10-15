@@ -23,6 +23,7 @@ def test_save_load_round_trips(tmp_path):
     p.offset_z = -3.0
     p.speed_mm_s = 15.0
     p.reverse_cut = True
+    p.kerf_comp_mm = 0.35
     p.batch_basename = "wing"
 
     path = tmp_path / "project.ssp"
@@ -41,6 +42,7 @@ def test_save_load_round_trips(tmp_path):
     assert reloaded.offset_z == -3.0
     assert reloaded.speed_mm_s == 15.0
     assert reloaded.reverse_cut is True
+    assert reloaded.kerf_comp_mm == 0.35
     assert reloaded.batch_basename == "wing"
 
 

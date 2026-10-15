@@ -679,6 +679,13 @@ class Sidebar(QScrollArea):
         self.cut_saved.setWordWrap(True)
         self.cut_saved.setProperty("class", "muted")
         s.add(self.cut_saved)
+        self.chk_kerf = QCheckBox("Keep the part at its drawn size")
+        self.chk_kerf.setToolTip("The wire melts a slot (the kerf) as it cuts. With this on, the wire runs half a kerf "
+                                 "outside the part (inside holes), so the part keeps its drawn size.")
+        self.chk_kerf.setChecked(self.c.kerf_on)
+        self.chk_kerf.setEnabled(False)  # until the Cut Lab has saved a kerf
+        self.chk_kerf.toggled.connect(self.c.set_kerf_on)
+        s.add(self.chk_kerf)
         return s
 
     def show_cut_settings(self, w) -> None:  # type: ignore[no-untyped-def]
@@ -690,6 +697,8 @@ class Sidebar(QScrollArea):
         self.cut_saved.setText(f"✓ In use: feed {w.work_feed_mm_s:.1f} mm/s · kerf {w.kerf_mm:.2f} mm "
                                f"({w.kerf_offset_mm:.2f} per side) · {mode}"
                                f"{' · calibrated' if w.calibrated else ''}{when}.")
+        self.chk_kerf.setEnabled(w.kerf_offset_mm > 0)
+        self.chk_kerf.setText(f"Keep the part at its drawn size (wire {w.kerf_offset_mm:.2f} mm outside)")
 
     def _on_speed(self) -> None:
         try:
