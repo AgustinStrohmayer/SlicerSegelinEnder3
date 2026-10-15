@@ -161,7 +161,7 @@ class Sidebar(QScrollArea):
         # step 2's rarely needed tools (plates, manual cuts, plate preview) hide behind a switch
         self.advanced_sections = self.step_sections[2][2:]
         self._advanced = False
-        self.chk_advanced = QCheckBox("Show advanced tools (plates, manual cuts)")
+        self.chk_advanced = QCheckBox("Advanced tools (plates, cuts)")
         self.chk_advanced.setToolTip("Split a big profile into plates or cut it by hand — not needed for one part")
         self.chk_advanced.toggled.connect(self._on_advanced)
 
@@ -223,7 +223,8 @@ class Sidebar(QScrollArea):
         for sp in root.findChildren(QAbstractSpinBox):
             sp.setMinimumWidth(56)
         for b in root.findChildren(QPushButton):
-            b.setMinimumWidth(min(b.minimumSizeHint().width(), 60))
+            if b.maximumWidth() > 60:  # fixed-size swatches keep their size
+                b.setMinimumWidth(min(b.minimumSizeHint().width(), 60))
 
     # ── workflow steps ────────────────────────────────────────────────
     def unlocked(self) -> list[bool]:

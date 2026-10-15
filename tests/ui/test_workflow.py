@@ -199,3 +199,13 @@ def test_each_step_shows_only_what_it_can_use(app, tmp_path):
     c.set_kerf_on(False)
     c.set_speed(4.0)  # the summary follows the project
     assert "Feed 4 mm/s" in sb.export_summary.text() and "drawn line" in sb.export_summary.text()
+
+
+
+def test_advanced_tools_dont_widen_the_panel(window):
+    from PyQt6.QtWidgets import QPushButton
+
+    sb = window.sidebar
+    swatches = [b for b in sb.part_section.findChildren(QPushButton) if b.maximumWidth() == 20]
+    assert len(swatches) >= 6
+    assert all(b.minimumWidth() <= 20 for b in swatches)  # colour dots once made the whole panel 200 px wider
