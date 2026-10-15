@@ -1,0 +1,28 @@
+:root { --bg: #0f1216; --bg2: #171c22; --text: #d7dde5; --muted: #8a94a3; --surface: rgba(30, 35, 42, .82);
+  --border: rgba(255, 255, 255, .08); --accent: #f59e0b; }
+html, body { margin: 0; height: 100%; overflow: hidden; user-select: none;
+  font: 12px/1.2 "Segoe UI", system-ui, sans-serif; color: var(--text);
+  background: radial-gradient(120% 90% at 50% 15%, var(--bg2) 0%, var(--bg) 70%); }
+#stage { position: absolute; inset: 0; }
+#stage canvas { display: block; outline: none; cursor: grab; touch-action: none; }
+/* Orientation sphere (drag to orbit, click an axis) and the camera bar under it, as in Topolabs. */
+#gizmo { position: absolute; top: 6px; right: 6px; width: 116px; height: 116px; border-radius: 50%;
+  cursor: pointer; touch-action: none; }
+#camera-bar { position: absolute; top: 128px; right: 47px; display: flex; flex-direction: column; gap: 2px; padding: 3px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+  backdrop-filter: blur(8px); box-shadow: 0 4px 14px rgba(0, 0, 0, .18); }
+#camera-bar button { width: 28px; height: 28px; display: grid; place-items: center; padding: 0; border: 0;
+  border-radius: 7px; background: transparent; color: var(--muted); cursor: pointer;
+  transition: background-color .16s ease, color .16s ease, transform .09s ease; }
+#camera-bar button:hover { color: var(--text); background: var(--border); }
+#camera-bar button:active { transform: scale(.9); }
+#camera-bar button[aria-pressed=true] { color: #111; background: var(--accent); }
+#camera-bar svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 1.7;
+  stroke-linecap: round; stroke-linejoin: round; }
+#feedback { position: absolute; bottom: 30px; left: 50%; transform: translateX(-50%); pointer-events: none;
+  padding: 5px 12px; border-radius: 999px; background: var(--surface); border: 1px solid var(--border);
+  color: var(--muted); font-size: 11px; font-weight: 500; opacity: 0; transition: opacity .18s; }
+#feedback.on { opacity: 1; }
+#hint { position: absolute; left: 50%; transform: translateX(-50%); bottom: 9px; color: var(--muted); opacity: .7;
+  font-size: 11px; white-space: nowrap; transition: opacity .6s; pointer-events: none; }
+body.used #hint { opacity: 0; }

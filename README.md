@@ -31,7 +31,27 @@ From the repository root:
 1. Install dependencies:
    `pip install -r requirements.txt`
 2. Run the app:
-   `python appSlicerSegelin/app.py`
+   - New PyQt6 UI (recommended): `python -m appSlicerSegelin.v2`
+   - Legacy Tkinter UI: `python appSlicerSegelin/app.py`
+
+### New v2 UI
+
+`appSlicerSegelin/v2/` is a modular rewrite with a modern PyQt6 interface
+(dark/light themes, command palette via `Ctrl+K`, pan/zoom canvas, bottom
+simulation timeline) and a UI-agnostic, fully tested core. It keeps full
+feature parity with the legacy app: DXF import with unit auto-scaling,
+rotate/auto-height/mirror/translate/align/reverse, manual Y/Z/diagonal
+cuts, Y×Z plate splitting, real-time simulation, and G-code export
+(standard, plate batch) plus modified-DXF export.
+
+The **Cut Lab** (`Simulate → Cut Lab`, `Ctrl+Shift+L`) models the hot wire cutting
+foam: wire temperature, kerf, contact, a 2-D thermal solve, prediction curves and
+calibration against your own test cuts. See [docs/guia-cut-lab.md](docs/guia-cut-lab.md)
+(quick guide, Spanish) and [docs/fisica-del-corte.md](docs/fisica-del-corte.md)
+(equations, validation and references, Spanish).
+
+Run the tests with `pytest` (install dev tools via
+`pip install -r requirements-dev.txt`).
 
 ## Building executables
 

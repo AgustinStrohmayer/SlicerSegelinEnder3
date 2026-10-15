@@ -1,0 +1,245 @@
+"""Main window: block-first steps, one block and one machine for the 3D view, simulator and Cut Lab (headless)."""
+from __future__ import annotations
+
+import os
+from dataclasses import replace
+
+import pytest
+
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+pytest.importorskip("PyQt6")
+pytest.importorskip("pyqtgraph.opengl")
+ezdxf = pytest.importorskip("ezdxf")
+
+
+@pytest.fixture(scope="module")
+def app():
+    from PyQt6.QtWidgets import QApplication
+
+    yield QApplication.instance() or QApplication([])
+
+
+def _plate(tmp_path, h: float):
+    doc = ezdxf.new("R2010", units=4)  # mm
+    doc.modelspace().add_lwpolyline([(0, 0), (100, 0), (100, h), (0, h)], close=True)
+    path = tmp_path / f"plate{h:g}.dxf"
+    doc.saveas(path)
+    return str(path)
+
+
+def _shown(w, step: int) -> bool:
+    return any(sec.isVisibleTo(w.sidebar) for sec in w.sidebar.step_sections[step])
+
+
+@pytest.fixture()
+def window(app, tmp_path):
+    """A 70 mm tall plate imported straight away (step 1 skipped): the block is made around it."""
+    from appSlicerSegelin.v2.ui.main_window import MainWindow
+
+    w = MainWindow()
+    w.controller.import_dxf(_plate(tmp_path, 70))
+    w._flush_check()
+    return w
+
+
+def test_block_first(app, tmp_path):
+    from appSlicerSegelin.v2.core.geometry import BBox
+    from appSlicerSegelin.v2.ui.main_window import MainWindow
+
+    w = MainWindow()
+    sb, c = w.sidebar, w.controller
+    assert sb.active_step == 1 and _shown(w, 1) and not _shown(w, 2)
+    assert sb.unlocked() == [True, False, False, False, False]
+    assert not sb.steps.chips[1].isEnabled()
+    sb.show_step(2)  # locked: stays on step 1
+    assert sb.active_step == 1
+    assert sb.b_create.isVisibleTo(sb) and not sb.block_form.isVisibleTo(sb)
+    assert not w._status_check.text()
+
+    sb.b_create.click()
+    assert c.project.block_created and not c.project.block_auto
+    assert sb.block_form.isVisibleTo(sb) and not sb.b_create.isVisibleTo(sb)
+    assert c.block_issues == [] and "fits the printer" in sb.block_status.text()
+    assert sb.steps.states()[0] == "done" and sb.steps.chips[1].isEnabled()
+    assert w._status_check.text() == "✓ Fits the machine"
+
+    sb.sp_h.setValue(c.project.rig.nozzle_clearance + 10)  # taller than the gap under the carriage
+    assert any("nozzle" in i for i in c.block_issues)
+    assert sb.steps.states()[0] == "warn" and "⚠" in sb.block_status.text()
+    assert not sb.next_buttons[1].isEnabled()
+    assert "machine problem" in w._status_check.text()
+    sb.sp_h.setValue(40.0)
+    assert c.block_issues == [] and sb.next_buttons[1].isEnabled()
+
+    sb.next_buttons[1].click()
+    assert sb.active_step == 2 and _shown(w, 2) and not _shown(w, 1)
+    assert not sb.steps.chips[2].isEnabled()  # no profile yet
+    c.import_dxf(_plate(tmp_path, 20))
+    w._flush_check()
+    b, box = c.project.block, BBox.from_segments(c.project.machine_segments())
+    assert box.width == pytest.approx(100.0)
+    assert box.min_y == pytest.approx(b.y0 + 5) and box.max_z == pytest.approx(b.z1 - 5)  # front-top corner
+    assert not c.project.block_auto and b.height_z == 40.0  # the user's block is kept
+    assert sb.steps.chips[2].isEnabled()
+    sb.next_buttons[2].click()
+    assert sb.active_step == 3 and _shown(w, 3)
+
+
+def test_import_without_block(window):
+    w = window
+    c, sb = w.controller, w.sidebar
+    assert c.project.block_created and c.project.block_auto  # made around the profile
+    assert sb.active_step == 2
+    assert any("collide" in i for i in c.cut_issues)
+    assert "machine problem" in w._status_check.text()
+    assert sb.steps.states()[2] == "warn"
+    sb.show_step(3)
+    assert "collide" in sb.check_status.text()
+    assert not sb.sp_h.isEnabled()  # follows the G-code
+    sb.chk_fit.setChecked(False)
+    assert sb.sp_h.isEnabled()
+    sb.sp_h.setValue(30.0)
+    assert c.project.block.height_z == 30.0 and not c.project.block_auto
+
+
+def test_screens_share_block_and_machine(window):
+    w = window
+    p = w.controller.project
+    w._on_cut_lab()  # step 4: the Cut Lab replaces the 3D view in the main window
+    lab = w._cut_lab
+    assert w._canvas_stack.currentWidget() is lab and w.sidebar.active_step == 4
+    assert lab.linked and lab.block == p.block
+    assert lab.params.span.value() == pytest.approx(p.rig.wire_span, abs=0.1)
+    lab.sim.b_h.setValue(95.0)  # edit the block in the Cut Lab: taller than the gap under the carriage
+    assert p.block.height_z == 95.0
+
+    w.sidebar.sp_spacer.setValue(15.0)  # and in the main window (step 1)
+    assert lab.block.spacer == 15.0
+    w.sidebar.show_step(1)
+    assert w._canvas_stack.currentWidget() is not lab  # leaving step 4 brings the workspace back
+
+    w._flush_check()
+    w._view3d_action.setChecked(True)
+    v = w._viewer3d
+    assert v.block == p.block and v.rig == p.rig and v.block_shown
+    assert v.alert  # this block collides with the carriage: the foam is drawn red
+    assert w.sidebar.steps.states()[3] == "done"  # Cut Lab visited
+    w._view3d_action.setChecked(False)
+
+
+def test_chips_show_one_step(window):
+    w = window
+    for step in (5, 1, 3):
+        w.sidebar.steps.chips[step - 1].click()
+        assert w.sidebar.active_step == step
+        assert all(_shown(w, n) == (n == step) for n in range(1, 6))
+
+
+def test_fit_gives_back_the_users_block_and_edits_undo(window):
+    c, sb = window.controller, window.sidebar
+    sb.show_step(3)
+    sb.chk_fit.setChecked(False)
+    mine = replace(c.project.block, length_y=180.0, height_z=45.0, y0=8.0)
+    c.set_block(mine)
+    sb.chk_fit.setChecked(True)  # fitted to the cut…
+    assert c.project.block != mine
+    sb.chk_fit.setChecked(False)  # …and back to what the user had
+    assert c.project.block == mine
+    sb.sp_w.plus.click()  # one undo step per edit, even when the button is clicked again and again
+    sb.sp_w.plus.click()
+    assert c.project.block.width_x == mine.width_x + 10
+    c.undo()
+    assert c.project.block == mine and sb.sp_w.value() == mine.width_x
+
+
+def test_beginner_sees_only_the_essentials(window):
+    sb = window.sidebar
+    sb.show_step(2)
+    assert not any(sec.isVisibleTo(sb) for sec in sb.advanced_sections)
+    sb.chk_advanced.setChecked(True)
+    assert all(sec.isVisibleTo(sb) for sec in sb.advanced_sections)
+    sb.show_step(3)
+    assert sb.fix_row.isVisibleTo(sb)  # the 70 mm plate hits the carriage: offer the way back
+    sb.show_step(2)
+    sb.cmb_entry.setCurrentIndex(sb.cmb_entry.findData("top"))
+    assert window.controller.project.entry == "top"
+
+
+def test_cut_lab_kerf_keeps_the_part_at_size(window):
+    from appSlicerSegelin.v2.core.cut_profile import WorkSettings
+
+    w = window
+    c, sb = w.controller, w.sidebar
+    w._on_cut_settings(WorkSettings(work_feed_mm_s=6.0, kerf_mm=0.8))
+    assert c.project.speed_mm_s == 6.0 and c.project.kerf_comp_mm == pytest.approx(0.4)
+    assert sb.chk_kerf.isEnabled() and sb.chk_kerf.isChecked() and "0.40 mm" in sb.chk_kerf.text()
+    w._flush_check()
+    compensated = c.gcode_text
+    sb.chk_kerf.setChecked(False)  # cut on the line
+    w._flush_check()
+    assert c.project.kerf_comp_mm == 0.0 and c.gcode_text != compensated  # the G-code follows it
+
+
+def test_each_step_shows_only_what_it_can_use(app, tmp_path):
+    from appSlicerSegelin.v2.ui.main_window import MainWindow
+
+    w = MainWindow()
+    sb, c = w.sidebar, w.controller
+    sb.b_create.click()
+    sb.show_step(2)
+    shape = sb.step_sections[2][1]
+    assert not shape.isVisibleTo(sb)  # nothing to turn or move before a profile is loaded
+    c.import_dxf(_plate(tmp_path, 20))
+    assert shape.isVisibleTo(sb)
+
+    sb.show_step(4)  # the Cut Lab covers the centre: no playback bar, no button to open it again
+    assert not w._timeline_dock.isVisibleTo(w) and not sb.b_lab.isVisibleTo(sb)
+    sb.show_step(5)
+    assert w._timeline_dock.isVisibleTo(w)
+    c.set_kerf_on(False)
+    c.set_speed(4.0)  # the summary follows the project
+    assert "Feed 4 mm/s" in sb.export_summary.text() and "drawn line" in sb.export_summary.text()
+
+
+
+def test_advanced_tools_dont_widen_the_panel(window):
+    from PyQt6.QtWidgets import QPushButton
+
+    sb = window.sidebar
+    swatches = [b for b in sb.part_section.findChildren(QPushButton) if b.maximumWidth() == 20]
+    assert len(swatches) >= 6
+    assert all(b.minimumWidth() <= 20 for b in swatches)  # colour dots once made the whole panel 200 px wider
+
+
+def test_toolbar_shows_only_tools_that_work(app, tmp_path):
+    from appSlicerSegelin.v2.ui.main_window import MainWindow
+
+    w = MainWindow()
+    assert not any(a.isEnabled() for a in w._geo_actions)  # no profile: nothing to rotate or mirror
+    w.controller.import_dxf(_plate(tmp_path, 20))
+    assert all(a.isEnabled() for a in w._geo_actions)
+    w._view3d_action.setChecked(True)
+    assert not w._measure_action.isVisible() and not w._dims_action.isVisible()  # 2D-only tools
+    w._view3d_action.setChecked(False)
+    assert w._measure_action.isVisible()
+
+
+def test_wire_starts_on_the_block_and_the_checklist_says_how(app, tmp_path):
+    from appSlicerSegelin.v2.ui.main_window import MainWindow
+
+    w = MainWindow()
+    sb, c = w.sidebar, w.controller
+    sb.b_create.click()
+    c.import_dxf(_plate(tmp_path, 20))
+    w._flush_check()
+    sb.show_step(5)
+    b = c.project.block
+    assert sb.cmb_origin.currentData() == "top" and sb.cmb_origin.isEnabled()
+    text = sb.export_check.text()
+    assert "front-top edge" in text and f"{b.length_y:.0f} × {b.height_z:.0f}" in text and "G28" in text
+    assert c.toolpath.start == (pytest.approx(b.y0), pytest.approx(b.z1))
+    sb.cmb_origin.setCurrentIndex(sb.cmb_origin.findData("bottom"))
+    assert c.project.origin == "bottom" and c.toolpath.start == (0, 0)
+    assert "bottom face" in sb.export_check.text()
+    c.set_block(replace(b, height_z=b.height_z + 10))  # the checklist follows the block
+    assert f"× {b.height_z + 10:.0f} ×" in sb.export_check.text()
