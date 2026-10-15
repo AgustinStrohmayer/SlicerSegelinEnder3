@@ -20,7 +20,7 @@ def app():
 
 
 def _plate(tmp_path, h: float):
-    doc = ezdxf.new("R2010")
+    doc = ezdxf.new("R2010", units=4)  # mm
     doc.modelspace().add_lwpolyline([(0, 0), (100, 0), (100, h), (0, h)], close=True)
     path = tmp_path / f"plate{h:g}.dxf"
     doc.saveas(path)
@@ -77,8 +77,8 @@ def test_block_first(app, tmp_path):
     c.import_dxf(_plate(tmp_path, 20))
     w._flush_check()
     b, box = c.project.block, BBox.from_segments(c.project.machine_segments())
-    assert box.min_y + box.width / 2 == pytest.approx((b.y0 + b.y1) / 2)  # dropped in the middle of the block
-    assert box.min_z + box.height / 2 == pytest.approx((b.z0 + b.z1) / 2)
+    assert box.width == pytest.approx(100.0)
+    assert box.min_y == pytest.approx(b.y0 + 5) and box.max_z == pytest.approx(b.z1 - 5)  # front-top corner
     assert not c.project.block_auto and b.height_z == 40.0  # the user's block is kept
     assert sb.steps.chips[2].isEnabled()
     sb.next_buttons[2].click()
@@ -110,14 +110,15 @@ def test_screens_share_block_and_machine(window):
     assert w._canvas_stack.currentWidget() is lab and w.sidebar.active_step == 4
     assert lab.linked and lab.block == p.block
     assert lab.params.span.value() == pytest.approx(p.rig.wire_span, abs=0.1)
-    lab.sim.b_h.setValue(72.0)  # edit the block in the Cut Lab
-    assert p.block.height_z == 72.0
+    lab.sim.b_h.setValue(95.0)  # edit the block in the Cut Lab: taller than the gap under the carriage
+    assert p.block.height_z == 95.0
 
     w.sidebar.sp_spacer.setValue(15.0)  # and in the main window (step 1)
     assert lab.block.spacer == 15.0
     w.sidebar.show_step(1)
     assert w._canvas_stack.currentWidget() is not lab  # leaving step 4 brings the workspace back
 
+    w._flush_check()
     w._view3d_action.setChecked(True)
     v = w._viewer3d
     assert v.block == p.block and v.rig == p.rig and v.block_shown
@@ -177,3 +178,4 @@ def test_cut_lab_kerf_keeps_the_part_at_size(window):
     sb.chk_kerf.setChecked(False)  # cut on the line
     w._flush_check()
     assert c.project.kerf_comp_mm == 0.0 and c.gcode_text != compensated  # the G-code follows it
+
