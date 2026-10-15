@@ -50,12 +50,12 @@ def test_three_without_scheme_falls_back(app):
 
 
 def test_main_view_draws_the_real_machine(app):
-    from appSlicerSegelin.v2.ui.widgets.canvas.viewer3d import Viewer3D, spring_points
+    from appSlicerSegelin.v2.ui.widgets.canvas.viewer3d import HOLE_Y, Viewer3D, spring_points
 
     v = Viewer3D()
     assert v.scene.has("arm_l") and v.scene.has("arm_r") and v.scene.has("clamp_l") and v.scene.has("spring")
     v.set_wire(30.0, 12.0)
-    assert v.scene._offsets["bed"] == (0.0, -30.0, 0.0)  # the bed carries the foam along Y
+    assert v.scene._offsets["bed"] == (0.0, HOLE_Y - 30.0, 0.0)  # the bed carries the foam along Y, under the wire
     assert v.scene._offsets["gantry"][2] > 12.0          # the gantry carries the wire along Z (above the spacer)
     sp = spring_points(v.rig)
     assert np.isfinite(sp).all() and len(sp) > 200

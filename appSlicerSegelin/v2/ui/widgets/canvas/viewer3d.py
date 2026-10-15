@@ -166,8 +166,10 @@ class Viewer3D(QWidget):
     def set_wire(self, app_y: float, app_z: float) -> None:
         """Put the wire at (G-code Y, G-code Z): the bed slides along Y, the gantry along Z."""
         b = self.block
-        self.scene.offset("bed", (0.0, -app_y, 0.0))
-        self.scene.offset("bedplate", (0.0, (b.y0 + b.y1) / 2 - app_y, 0.0))  # the plate centred under the block
+        # the wire runs through the arms' holes at HOLE_Y: G-code Y lands there, so the cut drawn on the
+        # block passes exactly under the wire
+        self.scene.offset("bed", (0.0, HOLE_Y - app_y, 0.0))
+        self.scene.offset("bedplate", (0.0, HOLE_Y + (b.y0 + b.y1) / 2 - app_y, 0.0))  # centred under the block
         h = bed_height(self.block, app_z)
         self.scene.offset("gantry", (0.0, 0.0, h))
         self.scene.offset("gantry_cad", (0.0, 0.0, h + self.rig.wire_drop))
@@ -190,9 +192,10 @@ class Viewer3D(QWidget):
             self._cum = np.concatenate([[0.0], np.cumsum(lens)])
             cols = np.repeat(np.array([_kind_rgb(sg.kind) for sg in path], np.float32), 2, axis=0)
             xf, xb = b.x_offset - b.width_x / 2 - 0.4, b.x_offset + b.width_x / 2 + 0.4
-            # the whole path, faint, always visible: where the wire will go before playing anything
-            self.scene.lines("path", self._bed_pts(_seg_pts(path, xf - 0.2)), "#ffffff", width=1.6, mode="segments",
-                             opacity=0.45, colors=cols, group="bed")
+            # the whole path, thin and grey, always visible: where the wire will go; what it has cut
+            # so far is drawn over it in colour, up to the wire
+            self.scene.lines("path", self._bed_pts(_seg_pts(path, xf - 0.2)), "#8A94A3", width=1.4, mode="segments",
+                             opacity=0.7, group="bed")
             for oid, x in (("cut", xf), ("cut_back", xb)):
                 self.scene.lines(oid, self._bed_pts(_seg_pts(path, x)), "#F59E0B", width=3.0, mode="segments",
                                  colors=cols, group="bed")
