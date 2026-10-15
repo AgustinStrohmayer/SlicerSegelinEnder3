@@ -201,6 +201,7 @@ class Sidebar(QScrollArea):
         self.c.info_changed.connect(self._refresh_manual_list)
         self.c.changed.connect(self._refresh_steps)
         self.c.setup_changed.connect(self._refresh_check)
+        self.c.info_changed.connect(lambda: self._active == 5 and self._refresh_export())
         self._refresh_layer_state()
         self._refresh_manual_list()
         self.update_part_panel()
@@ -300,8 +301,10 @@ class Sidebar(QScrollArea):
                 "Rotate, mirror and move the profile so it sits inside the block, then check it (step 3)."),
             3: (f"⚠ {nc} problem{'s' if nc > 1 else ''} with this cut on the machine — see below." if nc else
                 "✓ The cut fits the machine. Watch it in 3D or the simulator, then go to the Cut Lab."),
-            4: "Find the wire temperature, feed and kerf in the Cut Lab, then enter the feed as the work speed.",
-            5: "✓ G-code exported." if 5 in seen else "Export the G-code for the printer.",
+            4: ("✓ The project uses the Cut Lab's saved feed and kerf. Change them here, or go on to export."
+                if c.cut_settings is not None else
+                "Set the supply, feed and kerf in the Cut Lab, then save them on its last screen."),
+            5: "✓ G-code exported." if 5 in seen else "Export the G-code, then follow the checklist before cutting.",
         }[self._active]
         self.steps.set_states(states, hint)
         self.steps.set_active(self._active, unlocked)
@@ -309,6 +312,9 @@ class Sidebar(QScrollArea):
         self.next_buttons[1].setEnabled(not nb)
         self.next_buttons[2].setEnabled(geo)
         self.fix_row.setVisible(geo and bool(nc))
+        self.step_sections[2][1].setVisible(self._active == 2 and geo)  # nothing to turn or move yet
+        if self._active == 5:
+            self._refresh_export()
         self.b_create.setVisible(not block)
         self.block_form.setVisible(block)
 
@@ -434,7 +440,8 @@ class Sidebar(QScrollArea):
     # ── 2. Profile: load the DXF ──────────────────────────────────────
     def _section_file(self) -> CollapsibleSection:
         s = CollapsibleSection("2 · Profile — load DXF")
-        intro = QLabel("Load the outline you want to cut (a DXF drawing). It lands in the middle of the block.")
+        intro = QLabel("Load the outline you want to cut (a DXF drawing). It lands in the block's front-top corner, "
+                       "which leaves the rest of the foam in one piece.")
         intro.setWordWrap(True)
         intro.setProperty("class", "muted")
         s.add(intro)
@@ -660,16 +667,18 @@ class Sidebar(QScrollArea):
     # ── 4. Wire, feed & kerf (Cut Lab) ────────────────────────────────
     def _section_cut(self) -> CollapsibleSection:
         s = CollapsibleSection("4 · Wire && feed — Cut Lab")
-        intro = QLabel("Find the wire drive and the feed that cut cleanly, and how much the kerf takes off the "
-                       "part. Then enter that feed as the work speed.")
+        intro = QLabel("Find the supply setting and the feed that cut cleanly, and how wide a slot (kerf) the wire "
+                       "melts. Save them on the Cut Lab's last screen: the project then cuts at that feed and keeps "
+                       "the part at its drawn size.")
         intro.setWordWrap(True)
         intro.setProperty("class", "muted")
         s.add(intro)
-        lab = _primary(QPushButton("Show the Cut Lab"))
-        lab.setToolTip("Wire temperature, kerf and a slice-by-slice simulation of this cut, in the main view "
-                       "(Ctrl+Shift+L)")
-        lab.clicked.connect(self.cut_lab_requested.emit)
-        s.add(lab)
+        self.b_lab = _primary(QPushButton("Back to the Cut Lab"))
+        self.b_lab.setToolTip("Wire temperature, kerf and a slice-by-slice simulation of this cut, in the main view "
+                              "(Ctrl+Shift+L)")
+        self.b_lab.clicked.connect(self.cut_lab_requested.emit)
+        self.b_lab.hide()  # only while the 3D view covers the lab
+        s.add(self.b_lab)
         self.in_speed = _num_input("10", 70)
         self.in_speed.setToolTip("Wire feed speed during cutting, in mm/s")
         self.in_speed.editingFinished.connect(self._on_speed)
@@ -683,10 +692,14 @@ class Sidebar(QScrollArea):
         self.chk_kerf.setToolTip("The wire melts a slot (the kerf) as it cuts. With this on, the wire runs half a kerf "
                                  "outside the part (inside holes), so the part keeps its drawn size.")
         self.chk_kerf.setChecked(self.c.kerf_on)
-        self.chk_kerf.setEnabled(False)  # until the Cut Lab has saved a kerf
+        self.chk_kerf.hide()  # until the Cut Lab has saved a kerf
         self.chk_kerf.toggled.connect(self.c.set_kerf_on)
         s.add(self.chk_kerf)
         return s
+
+    def set_lab_shown(self, shown: bool) -> None:
+        """The Cut Lab is (not) in the main view: offer the way back to it only when it is hidden."""
+        self.b_lab.setVisible(not shown)
 
     def show_cut_settings(self, w) -> None:  # type: ignore[no-untyped-def]
         """The Cut Lab's saved work settings (used by the project)."""
@@ -697,7 +710,8 @@ class Sidebar(QScrollArea):
         self.cut_saved.setText(f"✓ In use: feed {w.work_feed_mm_s:.1f} mm/s · kerf {w.kerf_mm:.2f} mm "
                                f"({w.kerf_offset_mm:.2f} per side) · {mode}"
                                f"{' · calibrated' if w.calibrated else ''}{when}.")
-        self.chk_kerf.setEnabled(w.kerf_offset_mm > 0)
+        self.chk_kerf.setVisible(w.kerf_offset_mm > 0)
+        self._refresh_steps()
         self.chk_kerf.setText(f"Keep the part at its drawn size (wire {w.kerf_offset_mm:.2f} mm outside)")
 
     def _on_speed(self) -> None:
@@ -959,22 +973,46 @@ class Sidebar(QScrollArea):
     # ── 5. Export ─────────────────────────────────────────────────────
     def _section_export(self) -> CollapsibleSection:
         s = CollapsibleSection("5 · Export G-code")
+        self.export_summary = QLabel("")
+        self.export_summary.setWordWrap(True)
+        self.export_summary.setProperty("class", "muted")
+        s.add(self.export_summary)
         b_g = _primary(QPushButton(get_icon("save", "#18181B"), "  Generate G-Code"))
         b_g.setToolTip("Export machine-ready G-code for the current profile (Ctrl+E)")
         b_g.clicked.connect(self.export_gcode_requested.emit)
         s.add(b_g)
+        check = QLabel(
+            "<b>Before you cut</b><br>"
+            "1. Set the supply as the Cut Lab says and let the wire heat up.<br>"
+            "2. Bring the wire to the start point: in front of the block, level with its bottom face "
+            "(the top of the spacer board). "
+            "The G-code takes that spot as zero.<br>"
+            "3. Don't home the printer (Auto Home, G28) with the segelín on: the arms would hit the bed.")
+        check.setWordWrap(True)
+        check.setObjectName("ExportChecklist")
+        s.add(check)
+        fold, more = _fold("Other exports")
         b_dxf = QPushButton("Export modified DXF")
         b_dxf.setToolTip("Save the transformed geometry back out as a DXF")
         b_dxf.clicked.connect(self.export_dxf_requested.emit)
-        s.add(b_dxf)
+        more.addWidget(b_dxf)
         self.in_basename = QLineEdit("cut")
         self.in_basename.setToolTip("Filename prefix used for each plate in a batch export")
         self.in_basename.editingFinished.connect(
             lambda: setattr(self.c.project, "batch_basename", self.in_basename.text() or "cut")
         )
-        s.add_layout(_row(QLabel("Base filename"), self.in_basename))
+        more.addLayout(_row(QLabel("Base filename"), self.in_basename))
         b_batch = QPushButton("Generate G-Codes by plates (batch)")
         b_batch.setToolTip("Export one G-code file per plate/part into a folder")
         b_batch.clicked.connect(self.export_batch_requested.emit)
-        s.add(b_batch)
+        more.addWidget(b_batch)
+        s.add(fold)
         return s
+
+    def _refresh_export(self) -> None:
+        """What the exported G-code will do, in one line."""
+        p = self.c.project
+        kerf = (f"the wire runs {p.kerf_comp_mm:.2f} mm outside the part (kerf)" if p.kerf_comp_mm > 0 else
+                "the wire runs on the drawn line (no kerf compensation)")
+        entry = "from the side" if p.entry == "side" else "from the top"
+        self.export_summary.setText(f"Feed {p.speed_mm_s:g} mm/s · {kerf} · the wire enters {entry}.")

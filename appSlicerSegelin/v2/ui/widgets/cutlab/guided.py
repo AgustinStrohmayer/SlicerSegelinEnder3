@@ -142,17 +142,22 @@ class WireGlow(QWidget):
         def xt(t: float) -> float:
             return bx0 + (bx1 - bx0) * min(max(t, 0.0), top) / top
 
-        zones = ((0, self.t_cut_min, REGIME["stall"], "too cold to cut"),
-                 (self.t_cut_min, HOT_LIMIT_C, REGIME["noncontact"], "cuts foam"),
-                 (HOT_LIMIT_C, top, "#9B6BE0", "too hot: smoke, wide slot"))
-        for t0, t1, col, text in zones:
+        zones = ((0, self.t_cut_min, REGIME["stall"], ("too cold to cut", "too cold", "cold")),
+                 (self.t_cut_min, HOT_LIMIT_C, REGIME["noncontact"], ("cuts foam", "cuts")),
+                 (HOT_LIMIT_C, top, "#9B6BE0", ("too hot: smoke, wide slot", "too hot", "hot")))
+        fm = p.fontMetrics()
+        for t0, t1, col, texts in zones:
+            room = xt(t1) - xt(t0)
+            text = next((t for t in texts if fm.horizontalAdvance(t) + 6 <= room), texts[-1])
             qc = QColor(col)
             qc.setAlpha(170)
             p.setPen(Qt.PenStyle.NoPen)
             p.setBrush(qc)
             p.drawRoundedRect(QRectF(xt(t0), by, xt(t1) - xt(t0), bh), 4, 4)
             p.setPen(QColor(c.muted))
-            p.drawText(QRectF(xt(t0), by + bh + 4, xt(t1) - xt(t0), 20), Qt.AlignmentFlag.AlignCenter, text)
+            tw = fm.horizontalAdvance(text) + 6  # a narrow zone's label may spill over, but never off the bar
+            cx = min(max((xt(t0) + xt(t1)) / 2, bx0 + tw / 2), bx1 - tw / 2)
+            p.drawText(QRectF(cx - tw / 2, by + bh + 4, tw, 20), Qt.AlignmentFlag.AlignCenter, text)
         xm = xt(self.t_air)
         p.setPen(QPen(QColor(c.text), 2))
         p.drawLine(QPointF(xm, by - 8), QPointF(xm, by + bh + 2))

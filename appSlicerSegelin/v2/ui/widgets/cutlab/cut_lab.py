@@ -315,7 +315,8 @@ class CutLab(QWidget):
             row.addWidget(b)
         row.addSpacing(10)
         row.addWidget(self.source, 1)
-        self.project_btn = QPushButton("Use current project")
+        self.project_btn = QPushButton("Back to my project")
+        self.project_btn.setToolTip("Show the project's own G-code again (after opening another one)")
         self.project_btn.clicked.connect(self._use_project)
         self.project_btn.setVisible(False)
         for text, slot in (("Open G-code…", self._open_gcode), ("Load profile…", self._load_profile),
@@ -593,6 +594,7 @@ class CutLab(QWidget):
         self.toolpath = parse_gcode(text)
         self.source_name = name
         self.linked = block is not None
+        self.project_btn.setVisible(self.project_provider is not None and not self.linked)  # the way back
         if block is not None:
             self.set_block(block)
         elif self.toolpath.moves:
@@ -628,7 +630,7 @@ class CutLab(QWidget):
 
     def set_project_provider(self, provider) -> None:  # type: ignore[no-untyped-def]
         self.project_provider = provider
-        self.project_btn.setVisible(provider is not None)
+        self.project_btn.setVisible(provider is not None and not self.linked)
 
     def _use_project(self) -> None:
         if self.project_provider is None:

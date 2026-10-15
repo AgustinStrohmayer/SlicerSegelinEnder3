@@ -218,6 +218,7 @@ class MainWindow(QMainWindow):
         dock.setWidget(self.timeline)
         dock.setFeatures(QDockWidget.DockWidgetFeature.DockWidgetMovable)
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, dock)
+        self._timeline_dock = dock
 
     # ── chrome ────────────────────────────────────────────────────────
     def _build_toolbar(self) -> None:
@@ -760,6 +761,8 @@ class MainWindow(QMainWindow):
             self._canvas_stack.setCurrentWidget(lab)
             if self.view_mode != "single":
                 self._set_view_mode("single")  # the lab needs the whole centre
+            self._timeline_dock.hide()  # the project's playback has nothing to show here
+        self.sidebar.set_lab_shown(True)
         if self.controller.has_geometry:
             self.sidebar.mark_visited(4)
 
@@ -769,6 +772,8 @@ class MainWindow(QMainWindow):
         if lab is None or self._canvas_stack.currentWidget() is not lab:
             return
         lab.save_default()  # its calibration is kept and used everywhere
+        self._timeline_dock.show()
+        self.sidebar.set_lab_shown(False)
         self._canvas_stack.setCurrentWidget(self._viewer3d if self._view3d and self._viewer3d else self.canvas)
         prev = getattr(self, "_mode_before_lab", None)
         if prev and prev != self.view_mode:

@@ -179,3 +179,23 @@ def test_cut_lab_kerf_keeps_the_part_at_size(window):
     w._flush_check()
     assert c.project.kerf_comp_mm == 0.0 and c.gcode_text != compensated  # the G-code follows it
 
+
+def test_each_step_shows_only_what_it_can_use(app, tmp_path):
+    from appSlicerSegelin.v2.ui.main_window import MainWindow
+
+    w = MainWindow()
+    sb, c = w.sidebar, w.controller
+    sb.b_create.click()
+    sb.show_step(2)
+    shape = sb.step_sections[2][1]
+    assert not shape.isVisibleTo(sb)  # nothing to turn or move before a profile is loaded
+    c.import_dxf(_plate(tmp_path, 20))
+    assert shape.isVisibleTo(sb)
+
+    sb.show_step(4)  # the Cut Lab covers the centre: no playback bar, no button to open it again
+    assert not w._timeline_dock.isVisibleTo(w) and not sb.b_lab.isVisibleTo(sb)
+    sb.show_step(5)
+    assert w._timeline_dock.isVisibleTo(w)
+    c.set_kerf_on(False)
+    c.set_speed(4.0)  # the summary follows the project
+    assert "Feed 4 mm/s" in sb.export_summary.text() and "drawn line" in sb.export_summary.text()
